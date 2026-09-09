@@ -33,8 +33,8 @@ what the snapshot preserves.
    agent-tabs restore --go
    ```
 
-Repeat per window. Tabs already running an agent are skipped, as is the tab the
-command runs from.
+Repeat per window. Tabs holding any live process (an agent, but also vim, psql
+or an ssh session) are skipped, as is the tab the command runs from.
 
 ## If there is no snapshot
 
