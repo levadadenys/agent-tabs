@@ -25,7 +25,7 @@ Per-agent session lookup:
 |---|---|---|
 | Claude | `~/.claude/sessions/<pid>.json` | `claude --resume <uuid>` |
 | Codex | the rollout transcript it holds open (`lsof`) | `codex resume <uuid>` |
-| Grok | open files under `~/.grok/sessions/<cwd>/<uuid>/` | `grok --resume <uuid>` |
+| Grok | open files under `~/.grok/sessions/<urlencoded-cwd>/<uuid>/` | `grok --resume <uuid>` |
 | ssh / other | the command line itself | replayed verbatim |
 | plain shell | working directory only | `cd <cwd>` |
 
@@ -61,14 +61,24 @@ agent-tabs restore 2 --go       # actually start the tabs
 agent-tabs restore 2 --go --new-window
 ```
 
-Restore is a **dry run by default**. It refuses to write into a tab that is
-already running an agent (override with `--force`) and never writes into the tab
-you are running it from.
+Restore is a **dry run by default**. It refuses to write into a tab that holds
+any live process -- an agent, but equally a `vim`, `psql` or `ssh` session
+(override with `--force`) -- and never writes into the tab you are running it
+from. Typing into a live `ssh` session would run the text on the remote host,
+so "live" deliberately means more than just the agent CLIs.
+
+A recorded command line is only replayed when it is a plain argument list.
+Anything containing shell syntax is reported but downgraded to a bare `cd`,
+because argv is data any local process controls and restore runs unattended.
 
 ## Config
 
 Everything installation-specific lives in `~/.agent-tabs/config.json`, outside
 the repository. It is optional; see `config.example.json`.
+
+Two environment variables override paths, mainly for testing:
+`AGENT_TABS_HOME` relocates the state directory, and `AGENT_TABS_CLI` tells the
+recorder where the CLI lives.
 
 `codex_profiles` maps an absolute `CODEX_HOME` to the command that selects that
 Codex account, for people running more than one:
@@ -101,5 +111,11 @@ overwrite a good snapshot with an empty one.
 ## Tests
 
 ```bash
-python3 tests/test_restore_plan.py
+python3 tests/run_all.py
 ```
+
+No test framework and no dependencies. The tests deliberately drive real call
+sites: the Codex account test spawns a real process holding a real rollout file
+and resolves it through a real `lsof`, and the snapshot tests exercise actual
+filesystem state. Each was mutation-checked -- reverting the fix it covers makes
+it fail -- because a test that passes against broken code is worse than none.
