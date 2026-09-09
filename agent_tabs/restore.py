@@ -154,16 +154,46 @@ def plan(window: dict, live: list[dict], target_window: int | None, force: bool)
     return actions
 
 
-def execute(actions: list[Action], target_window: int) -> int:
+def execute(actions: list[Action], target_window: int, force: bool = False) -> int:
+    """Send each runnable action to its tab.
+
+    Re-checks liveness immediately before typing. Planning and execution are
+    separated by however long the operator spent reading the dry run, and a tab
+    that became busy in between must not be typed into -- everything the plan
+    verified was true only at plan time.
+    """
     runnable = [a for a in actions if a.will_run]
     if not runnable:
         return 0
     ensure_tabs(target_window, max(a.tab_index for a in runnable))
+
+    busy_now: set[int] = set()
+    if not force:
+        busy_now = {
+            t["tab_index"]
+            for t in live_tabs()
+            if t["window_index"] == target_window and t["busy"]
+        }
+    own = current_tty()
+
     ran = 0
     for action in runnable:
+        if action.tab_index in busy_now:
+            print(f"  tab {action.tab_index:>2}  SKIP (became busy since the plan)")
+            continue
+        if own and _tty_of(target_window, action.tab_index) == own:
+            print(f"  tab {action.tab_index:>2}  SKIP (this is the tab you are running from)")
+            continue
         iterm.run_in_tab(target_window, action.tab_index, action.command)
         ran += 1
     return ran
+
+
+def _tty_of(window_index: int, tab_index: int) -> str | None:
+    for tab in iterm.enumerate_tabs():
+        if tab["window_index"] == window_index and tab["tab_index"] == tab_index:
+            return procs.normalise_tty(tab["tty"])
+    return None
 
 
 def ensure_tabs(target_window: int, needed: int) -> None:
