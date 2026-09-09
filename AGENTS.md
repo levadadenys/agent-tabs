@@ -60,13 +60,32 @@ Nothing installation-specific may be committed. Personal paths, account names
 and machine details belong in `~/.agent-tabs/config.json`, which is outside the
 repo. Before pushing, check:
 
+Scanning is done by [gitleaks](https://gitleaks.io), configured in
+`.gitleaks.toml`. Its default rules cover credentials; two custom rules add
+what matters here — machine-specific home paths and personal email addresses.
+
 ```bash
-tools/check-no-personal-paths.sh
+brew install gitleaks     # once
+gitleaks git --no-banner --log-opts="origin/main..HEAD"
 ```
 
-It scans every tracked file — including extensionless ones like `bin/agent-tabs`
-— and exits non-zero on a hit. The pre-push hook runs it, so a leak blocks the
-push rather than being caught later.
+The pre-push hook runs it automatically over **the commits being pushed**, not
+the working tree, so pushing another branch's ref from this checkout is still
+scanned. If gitleaks is missing the hook refuses the push rather than passing
+it unscanned.
+
+A hand-rolled `grep` scanner lived here first and was replaced after five
+rounds of review found five ways it could report clean while a leak existed
+(options injection from a dash-named file, a regex-dot over-match in its
+self-exclusion, whole-line exclusion hiding a real path beside the allowed
+placeholder, a discarded stderr, and a malformed range that scanned nothing).
+Do not reintroduce one. A leak check that fails open is worse than none,
+because it manufactures confidence.
+
+**Known limitation:** gitleaks reads diffs, and git does not emit content for
+files it classifies as binary, so a home path inside a binary blob is not
+scanned. Verified, not theoretical. This repo is all text; if that changes,
+revisit it.
 
 Placeholders in examples use `/Users/you`. History was audited before the first
 push; keep it that way rather than relying on a later cleanup, because history
