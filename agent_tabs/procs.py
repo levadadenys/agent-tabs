@@ -44,6 +44,8 @@ def process_table() -> list[Proc]:
         ["ps", "-Ao", "pid=,ppid=,tty=,command="],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     ).stdout
     procs: list[Proc] = []
@@ -113,6 +115,8 @@ def cwd_of(pids: list[int]) -> dict[int, str]:
         ["lsof", "-a", "-d", "cwd", "-p", ",".join(str(p) for p in pids), "-Fpn"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     ).stdout
     result: dict[int, str] = {}
@@ -129,11 +133,13 @@ def cwd_of(pids: list[int]) -> dict[int, str]:
 
 
 def open_files(pid: int) -> list[str]:
-    """Regular files a process currently holds open."""
+    """Paths a process currently holds open, across every file descriptor."""
     out = subprocess.run(
-        ["lsof", "-a", "-d", "0-99", "-p", str(pid), "-Fn"],
+        ["lsof", "-p", str(pid), "-Fn"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     ).stdout
     return [line[1:] for line in out.splitlines() if line.startswith("n")]
