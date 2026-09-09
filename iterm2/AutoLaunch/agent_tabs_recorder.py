@@ -26,10 +26,16 @@ LOG = os.path.expanduser("~/.agent-tabs/recorder.log")
 
 
 def log(message: str) -> None:
-    os.makedirs(os.path.dirname(LOG), exist_ok=True)
-    stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
-    with open(LOG, "a") as handle:
-        handle.write(f"{stamp} {message}\n")
+    """Best-effort logging. Never raises: this is called from inside the loop's
+    own exception handler, where an error would escape `while True` and end the
+    recorder permanently, silently, until the next iTerm restart."""
+    try:
+        os.makedirs(os.path.dirname(LOG), exist_ok=True)
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+        with open(LOG, "a") as handle:
+            handle.write(f"{stamp} {message}\n")
+    except Exception:
+        pass
 
 
 async def main(connection):
@@ -46,7 +52,11 @@ async def main(connection):
                 log(f"snapshot failed rc={result.returncode}: {result.stderr.strip()[:200]}")
         except Exception as exc:  # keep the loop alive across any transient failure
             log(f"snapshot error: {exc!r}")
-        await asyncio.sleep(INTERVAL_SECONDS)
+        try:
+            await asyncio.sleep(INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            log("recorder cancelled")
+            raise
 
 
 iterm2.run_forever(main)
