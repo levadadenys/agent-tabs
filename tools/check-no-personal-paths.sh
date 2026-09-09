@@ -1,14 +1,18 @@
 #!/bin/sh
-# Fail if a tracked file contains a home directory path or a personal email.
+# Fail if a tracked file contains a home directory path or an email at one of
+# the common consumer providers.
 #
 # This repo is intended to become public, and history stays visible once it is,
 # so the check belongs before the push rather than in a later cleanup.
 #
-# Two deliberate details:
+# Three deliberate details:
 #   - it scans `git ls-files`, not a list of extensions, so extensionless files
 #     like bin/agent-tabs and .githooks/pre-push are covered too;
-#   - it excludes itself, because a scanner necessarily contains the pattern it
-#     searches for. Nothing else is excluded.
+#   - `--` terminates grep's options, because a tracked file whose name begins
+#     with a dash would otherwise be read as one, and grep would fail rather
+#     than scan. stderr is deliberately not silenced, so that failure is loud;
+#   - it excludes itself by fixed-string prefix, because a scanner necessarily
+#     contains the pattern it searches for. Nothing else is excluded.
 #
 # Placeholders in examples use /Users/you, which is allowed.
 SELF="tools/check-no-personal-paths.sh"
@@ -16,11 +20,16 @@ PATTERN='/Users/[A-Za-z0-9._-]+|[A-Za-z0-9._%+-]+@(gmail|googlemail|icloud|yahoo
 
 cd "$(git rev-parse --show-toplevel)" || exit 2
 
+files=$(git ls-files)
+if [ -z "$files" ]; then
+    exit 0
+fi
+
 hits=$(
     git ls-files -z \
-        | xargs -0 grep -nIE "$PATTERN" 2>/dev/null \
+        | xargs -0 grep -nIE "$PATTERN" -- \
         | grep -v '/Users/you' \
-        | grep -v "^${SELF}:"
+        | awk -v self="${SELF}:" 'index($0, self) != 1'
 )
 
 if [ -n "$hits" ]; then
