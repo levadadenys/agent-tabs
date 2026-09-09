@@ -5,7 +5,7 @@
 # This repo is intended to become public, and history stays visible once it is,
 # so the check belongs before the push rather than in a later cleanup.
 #
-# Three deliberate details:
+# Four deliberate details:
 #   - it scans `git ls-files`, not a list of extensions, so extensionless files
 #     like bin/agent-tabs and .githooks/pre-push are covered too;
 #   - `--` terminates grep's options, because a tracked file whose name begins
