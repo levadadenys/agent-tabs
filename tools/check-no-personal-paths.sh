@@ -12,7 +12,9 @@
 #     with a dash would otherwise be read as one, and grep would fail rather
 #     than scan. stderr is deliberately not silenced, so that failure is loud;
 #   - it excludes itself by fixed-string prefix, because a scanner necessarily
-#     contains the pattern it searches for. Nothing else is excluded.
+#     contains the pattern it searches for. Nothing else is excluded;
+#   - it matches per occurrence (grep -o), not per line, so a line holding the
+#     allowed placeholder alongside a real path still reports the real one.
 #
 # Placeholders in examples use /Users/you, which is allowed.
 SELF="tools/check-no-personal-paths.sh"
@@ -25,11 +27,17 @@ if [ -z "$files" ]; then
     exit 0
 fi
 
+# grep -on prints file:line:match, one row per occurrence. The matched text is
+# the final colon-separated field, so the placeholder can be dropped on its own
+# rather than taking the whole line with it.
 hits=$(
     git ls-files -z \
-        | xargs -0 grep -nIE "$PATTERN" -- \
-        | grep -v '/Users/you' \
-        | awk -v self="${SELF}:" 'index($0, self) != 1'
+        | xargs -0 grep -onIE "$PATTERN" -- \
+        | awk -F: -v self="${SELF}:" '
+            index($0, self) == 1 { next }
+            $NF == "/Users/you"  { next }
+            { print }
+        '
 )
 
 if [ -n "$hits" ]; then
