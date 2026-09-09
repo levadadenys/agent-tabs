@@ -1,5 +1,6 @@
 #!/bin/sh
-# Reject direct pushes to the default branch.
+# Guard the default branch, and keep personal paths out of a repo that is
+# intended to become public.
 #
 # GitHub branch protection needs a paid plan for private repositories, so this
 # is the local stand-in. Enable it once per clone:
@@ -11,8 +12,19 @@
 #     git push --no-verify
 #
 PROTECTED="refs/heads/main"
+ROOT=$(git rev-parse --show-toplevel)
 
-while read -r _local_ref _local_sha remote_ref _remote_sha; do
+if [ -x "$ROOT/tools/check-no-personal-paths.sh" ]; then
+    "$ROOT/tools/check-no-personal-paths.sh" || {
+        echo "pre-push: refusing to push personal paths. See AGENTS.md." >&2
+        exit 1
+    }
+fi
+
+# `|| [ -n "$remote_ref" ]` handles a final line with no trailing newline. Git
+# always terminates the last line, but a hook that silently no-ops on
+# malformed input is the wrong failure mode for a guard.
+while read -r _local_ref _local_sha remote_ref _remote_sha || [ -n "$remote_ref" ]; do
     if [ "$remote_ref" = "$PROTECTED" ]; then
         echo "pre-push: refusing to push directly to ${PROTECTED#refs/heads/}." >&2
         echo "          Open a PR:  git switch -c <type>/<topic> && gh pr create" >&2
