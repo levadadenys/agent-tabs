@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import subprocess
 
-FIELD = "@@|@@"
+# ASCII unit separator: a terminal strips control characters from titles, so
+# unlike a printable delimiter this cannot collide with tab content and
+# silently drop a whole row.
+FIELD = "\x1f"
+FIELD_AS = "(character id 31)"
 
 
 class ITermError(RuntimeError):
@@ -18,7 +22,12 @@ class ITermError(RuntimeError):
 
 def _osascript(script: str) -> str:
     result = subprocess.run(
-        ["osascript", "-e", script], capture_output=True, text=True, check=False
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
     )
     if result.returncode != 0:
         raise ITermError(result.stderr.strip() or "osascript failed")
@@ -41,7 +50,7 @@ tell application "iTerm2"
             set si to 0
             repeat with s in sessions of tb
                 set si to si + 1
-                set out to out & wi & "{FIELD}" & (id of win) & "{FIELD}" & ti & "{FIELD}" & si & "{FIELD}" & (tty of s) & "{FIELD}" & (name of s) & linefeed
+                set out to out & wi & {FIELD_AS} & (id of win) & {FIELD_AS} & ti & {FIELD_AS} & si & {FIELD_AS} & (tty of s) & {FIELD_AS} & (name of s) & linefeed
             end repeat
         end repeat
     end repeat
