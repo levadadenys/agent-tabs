@@ -87,12 +87,36 @@ def test_load_without_a_snapshot_explains_itself():
             raise AssertionError("expected FileNotFoundError")
 
 
-def test_state_directory_is_owner_only():
+def test_directories_we_create_are_owner_only():
     with tempfile.TemporaryDirectory() as tmp:
-        m = fresh_module(Path(tmp))
+        # Assert on HISTORY_DIR, not STATE_DIR: mkdtemp already makes STATE_DIR
+        # 0700, so checking it would pass even with our mode= argument removed.
+        m = fresh_module(Path(tmp) / "state")
         m.save(snap_with(1))
-        mode = m.LATEST.parent.stat().st_mode & 0o777
-        assert mode == 0o700, f"state dir mode {oct(mode)}; snapshots hold argv"
+        mode = m.HISTORY_DIR.stat().st_mode & 0o777
+        assert mode == 0o700, f"history dir mode {oct(mode)}; snapshots hold argv"
+
+
+def test_an_existing_world_readable_directory_gets_hardened():
+    # mkdir(mode=) is ignored when the directory already exists, so an install
+    # created before this rule existed would stay world-readable forever.
+    with tempfile.TemporaryDirectory() as tmp:
+        state = Path(tmp) / "state"
+        (state / "history").mkdir(parents=True)
+        state.chmod(0o755)
+        (state / "history").chmod(0o755)
+        m = fresh_module(state)
+        m.save(snap_with(1))
+        assert state.stat().st_mode & 0o777 == 0o700, "pre-existing state dir not hardened"
+        assert (state / "history").stat().st_mode & 0o777 == 0o700
+
+
+def test_snapshot_files_are_owner_only():
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh_module(Path(tmp) / "state")
+        m.save(snap_with(1))
+        mode = m.LATEST.stat().st_mode & 0o777
+        assert mode == 0o600, f"snapshot file mode {oct(mode)}"
 
 
 if __name__ == "__main__":

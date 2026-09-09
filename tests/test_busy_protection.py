@@ -31,9 +31,15 @@ def test_non_agent_work_is_also_busy():
 
 
 def test_idle_shells_are_not_busy():
-    for command in ("-zsh", "zsh", "bash", "-bash", "fish",
+    for command in ("-zsh", "zsh", "bash", "-bash", "fish", "tcsh", "ksh", "dash",
                     "/usr/bin/login -fpl someone"):
         assert not restore.is_busy(proc(command)), command
+
+
+def test_a_shell_running_a_script_is_busy():
+    # argv0 is a shell name, but the tab is not at an idle prompt.
+    for command in ("bash deploy.sh", "zsh -c 'make build'", "sh ./release.sh"):
+        assert restore.is_busy(proc(command)), command
 
 
 def test_empty_tab_is_not_busy():
