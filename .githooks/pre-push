@@ -1,6 +1,6 @@
 #!/bin/sh
-# Guard the default branch, and keep personal paths out of a repo that is
-# intended to become public.
+# Guard the default branch, and keep secrets and personal paths out of a repo
+# that is intended to become public.
 #
 # GitHub branch protection needs a paid plan for private repositories, so this
 # is the local stand-in. Enable it once per clone:
@@ -12,24 +12,72 @@
 #     git push --no-verify
 #
 PROTECTED="refs/heads/main"
-ROOT=$(git rev-parse --show-toplevel)
+ZERO="0000000000000000000000000000000000000000"
 
-if [ -x "$ROOT/tools/check-no-personal-paths.sh" ]; then
-    "$ROOT/tools/check-no-personal-paths.sh" || {
-        echo "pre-push: refusing to push personal paths. See AGENTS.md." >&2
+fail() {
+    echo "pre-push: $1" >&2
+    shift
+    for line in "$@"; do echo "          $line" >&2; done
+    exit 1
+}
+
+# Scan the commits actually being pushed rather than the working tree: pushing
+# another branch's ref from this checkout would otherwise go unexamined, and
+# a leak that only exists in a commit would be missed entirely.
+scan_range() {
+    count=$(git rev-list --count $1 2>/dev/null) || \
+        fail "could not resolve the commit range '$1'." \
+             "Refusing rather than pushing unscanned. Override with --no-verify."
+    [ "${count:-0}" -eq 0 ] && return 0
+
+    if ! command -v gitleaks >/dev/null 2>&1; then
+        fail "gitleaks is not installed, so the push cannot be scanned." \
+             "Install it:  brew install gitleaks" \
+             "Refusing rather than passing unscanned. Override with --no-verify."
+    fi
+
+    output=$(gitleaks git --no-banner --redact --log-opts="$1" 2>&1)
+    status=$?
+
+    # gitleaks exits 0 when its own git invocation fails, so a bad range would
+    # otherwise read as "clean". Treat scanning nothing we expected to scan as
+    # a failure, not a pass.
+    if echo "$output" | grep -q "0 commits scanned" ; then
+        fail "gitleaks scanned no commits for range '$1' (expected $count)." \
+             "$(echo "$output" | grep -i 'err' | head -3)" \
+             "Refusing rather than trusting an empty scan."
+    fi
+
+    if [ "$status" -ne 0 ]; then
+        echo "pre-push: gitleaks found secrets or personal paths in the commits" >&2
+        echo "          being pushed:" >&2
+        echo "$output" | grep -vE '^\s*$' | tail -25 >&2
+        echo "" >&2
+        echo "          Use /Users/you in examples. Machine-specific values" >&2
+        echo "          belong in ~/.agent-tabs/config.json, outside the repo." >&2
         exit 1
-    }
-fi
+    fi
+}
 
 # `|| [ -n "$remote_ref" ]` handles a final line with no trailing newline. Git
-# always terminates the last line, but a hook that silently no-ops on
-# malformed input is the wrong failure mode for a guard.
-while read -r _local_ref _local_sha remote_ref _remote_sha || [ -n "$remote_ref" ]; do
+# always terminates it, but a guard that silently no-ops on malformed input
+# fails the wrong way.
+while read -r _local_ref local_sha remote_ref remote_sha || [ -n "$remote_ref" ]; do
+    [ -z "$remote_ref" ] && continue
+
     if [ "$remote_ref" = "$PROTECTED" ]; then
-        echo "pre-push: refusing to push directly to ${PROTECTED#refs/heads/}." >&2
-        echo "          Open a PR:  git switch -c <type>/<topic> && gh pr create" >&2
-        echo "          See AGENTS.md. Override with --no-verify if you mean it." >&2
-        exit 1
+        fail "refusing to push directly to ${PROTECTED#refs/heads/}." \
+             "Open a PR:  git switch -c <type>/<topic> && gh pr create" \
+             "See AGENTS.md. Override with --no-verify if you mean it."
+    fi
+
+    # A deletion pushes no content, so there is nothing to scan.
+    [ "$local_sha" = "$ZERO" ] && continue
+
+    if [ "$remote_sha" = "$ZERO" ]; then
+        scan_range "$local_sha --not --remotes"
+    else
+        scan_range "${remote_sha}..${local_sha}"
     fi
 done
 
