@@ -75,10 +75,24 @@ def agent_tab_count(snap: dict) -> int:
     )
 
 
+def _harden(directory: Path) -> None:
+    """Create a directory owner-only, and fix it if it already exists.
+
+    `mkdir(mode=...)` is applied only at creation time and silently does
+    nothing when the directory is already there, so an install created before
+    this rule existed would stay world-readable forever. Snapshots hold every
+    tab's command line, which can include credentials on another tab's argv.
+    """
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        if directory.stat().st_mode & 0o777 != 0o700:
+            directory.chmod(0o700)
+    except OSError:
+        pass  # a permission problem here must never block a capture
+
+
 def _write_atomic(path: Path, snap: dict) -> None:
-    # Snapshots hold every tab's command line, which can include credentials
-    # passed on another tab's argv; keep the directory owner-only too.
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _harden(path.parent)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as handle:
