@@ -6,9 +6,9 @@ import os
 import subprocess
 from dataclasses import dataclass, field
 
-# Shells and login wrappers are never the "interesting" process in a tab; they
-# are what remains once an agent exits.
-SHELL_NAMES = {"zsh", "bash", "sh", "fish", "-zsh", "-bash", "-sh", "login"}
+# What a tab looks like once whatever was running in it has exited.
+LOGIN_NAMES = {"login"}
+SHELL_NAMES = {"zsh", "bash", "sh", "fish", "tcsh", "csh", "ksh", "dash"}
 
 
 @dataclass
@@ -25,7 +25,17 @@ class Proc:
 
     @property
     def is_shell(self) -> bool:
-        return self.argv0 in SHELL_NAMES or self.command.lstrip("-") in SHELL_NAMES
+        """An *idle* shell -- a tab sitting at a prompt with nothing running.
+
+        A shell given a script (`bash deploy.sh`) is live work, not an idle
+        prompt, and must not be typed into. Only flags are ignored, so a login
+        shell (`-zsh`) still counts as idle.
+        """
+        if self.argv0 in LOGIN_NAMES:
+            return True
+        if self.argv0 not in SHELL_NAMES:
+            return False
+        return not [a for a in self.command.split()[1:] if not a.startswith("-")]
 
 
 @dataclass
