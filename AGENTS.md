@@ -61,9 +61,12 @@ and machine details belong in `~/.agent-tabs/config.json`, which is outside the
 repo. Before pushing, check:
 
 ```bash
-grep -rniE '/Users/|@gmail' --include='*.py' --include='*.md' --include='*.json' . \
-  | grep -v '/Users/you'
+tools/check-no-personal-paths.sh
 ```
+
+It scans every tracked file — including extensionless ones like `bin/agent-tabs`
+— and exits non-zero on a hit. The pre-push hook runs it, so a leak blocks the
+push rather than being caught later.
 
 Placeholders in examples use `/Users/you`. History was audited before the first
 push; keep it that way rather than relying on a later cleanup, because history
