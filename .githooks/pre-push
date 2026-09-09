@@ -1,0 +1,24 @@
+#!/bin/sh
+# Reject direct pushes to the default branch.
+#
+# GitHub branch protection needs a paid plan for private repositories, so this
+# is the local stand-in. Enable it once per clone:
+#
+#     git config core.hooksPath .githooks
+#
+# Bypass deliberately (merging a PR locally, say) with:
+#
+#     git push --no-verify
+#
+PROTECTED="refs/heads/main"
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+    if [ "$remote_ref" = "$PROTECTED" ]; then
+        echo "pre-push: refusing to push directly to ${PROTECTED#refs/heads/}." >&2
+        echo "          Open a PR:  git switch -c <type>/<topic> && gh pr create" >&2
+        echo "          See AGENTS.md. Override with --no-verify if you mean it." >&2
+        exit 1
+    fi
+done
+
+exit 0

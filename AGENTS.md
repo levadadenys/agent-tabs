@@ -12,8 +12,19 @@ into live shells, so a wrong result is not a cosmetic bug.
 
 1. **Always work in a git worktree**, never directly in the main checkout:
    `git worktree add .worktrees/<topic> -b <type>/<topic>`
-2. **Always open a PR.** `main` is protected; direct pushes are rejected.
-   Branch names follow the commit types below (`fix/`, `feat/`, `chore/`, …).
+2. **Always open a PR.** Branch names follow the commit types below
+   (`fix/`, `feat/`, `chore/`, …).
+
+   GitHub branch protection requires a paid plan for private repositories, so
+   `main` is guarded by a pre-push hook instead. Enable it once per clone:
+
+   ```bash
+   git config core.hooksPath .githooks
+   ```
+
+   It rejects any push to `main`; `--no-verify` bypasses it deliberately. If
+   this repo ever goes public, replace the hook with a real ruleset — a local
+   hook is a reminder, not an enforcement boundary.
 3. **One commit per file**, conventional-commit style. The subject says what
    changed; the body says *why it was wrong*, not what the diff shows.
 4. Before ending a session that used a worktree, ask whether to keep or delete it.
