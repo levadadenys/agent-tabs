@@ -5,11 +5,38 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent_tabs import adapters, iterm, restore as restore_mod, snapshot as snap_mod  # noqa: E402
+
+def age_of(captured_at: str) -> str:
+    """How long ago a snapshot was taken, in words.
+
+    A raw ISO timestamp makes the reader do arithmetic at the worst possible
+    moment; a recorder that died days ago should be obvious at a glance.
+    """
+    try:
+        when = datetime.fromisoformat(captured_at)
+    except ValueError:
+        return "age unknown"
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    seconds = int((datetime.now(timezone.utc) - when).total_seconds())
+    if seconds < 0:
+        return "in the future"
+    if seconds < 90:
+        return f"{seconds}s ago"
+    minutes = seconds // 60
+    if minutes < 90:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours}h {minutes % 60}m ago"
+    return f"{hours // 24}d {hours % 24}h ago"
+
 
 KIND_MARK = {"claude": "C", "codex": "X", "grok": "G", "ssh": "S",
              "shell": ".", "command": ">", "empty": " "}
@@ -69,7 +96,10 @@ def cmd_list(args) -> int:
                     print(tab["restore"])
         return 0
 
-    print(f"Snapshot captured {snap['captured_at']}  ({snap_mod.agent_tab_count(snap)} agent sessions)")
+    print(
+        f"Snapshot captured {snap['captured_at']}  ({age_of(snap['captured_at'])})"
+        f"  -  {snap_mod.agent_tab_count(snap)} agent sessions"
+    )
     shown = 0
     for window in snap["windows"]:
         tabs = [t for t in window["tabs"] if keep(t)]
@@ -112,7 +142,7 @@ def cmd_restore(args) -> int:
 
     # Staleness matters most in exactly the situation this command is used in:
     # a recorder that died hours ago looks identical to a healthy one.
-    print(f"Snapshot captured {snap['captured_at']}")
+    print(f"Snapshot captured {snap['captured_at']}  ({age_of(snap['captured_at'])})")
     print(f"Restoring {how} into {target_label}\n")
     warnings = {
         t["tab_index"]: t["warning"]
@@ -135,7 +165,7 @@ def cmd_restore(args) -> int:
 
     if target is None:
         target = iterm.create_window(max(a.tab_index for a in runnable))
-    ran = restore_mod.execute(actions, target)
+    ran = restore_mod.execute(actions, target, args.force)
     print(f"\nStarted {ran} tabs in window {target}.")
     return 0
 
