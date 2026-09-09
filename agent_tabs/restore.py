@@ -7,7 +7,14 @@ from dataclasses import dataclass
 
 from . import adapters, iterm, procs, snapshot as snap_mod
 
-LIVE_AGENTS = {"claude", "codex", "grok"}
+# Anything that is not an idle shell counts as live work. Listing only the
+# agent CLIs here meant a tab that had since been given to vim, psql or an ssh
+# session was treated as free, and restore typed into it -- over ssh, that
+# executes on the remote host.
+
+
+class Ambiguous(ValueError):
+    """More than one snapshot window fits the live window equally well."""
 
 
 @dataclass
@@ -33,16 +40,26 @@ def current_tty() -> str | None:
     return procs.normalise_tty(env_tty) if env_tty else None
 
 
+def is_busy(proc: procs.Proc | None) -> bool:
+    """Does this tab hold live work that restore must not type into?
+
+    Any process that is not an idle shell counts. Restricting this to the agent
+    CLIs left vim, psql and ssh sessions unprotected, and typing into a live ssh
+    session runs the text on the remote host.
+    """
+    return proc is not None and not proc.is_shell
+
+
 def live_tabs() -> list[dict]:
     """Live iTerm tabs annotated with whatever agent is running in them."""
     tabs = iterm.enumerate_tabs()
     grouped = procs.by_tty(procs.process_table())
     for tab in tabs:
         proc = procs.foreground_proc(
-            grouped.get(procs.normalise_tty(tab["tty"]), []), snap_mod.AGENT_NAMES
+            grouped.get(procs.normalise_tty(tab["tty"]), []), adapters.AGENT_KINDS
         )
         tab["kind"] = proc.argv0 if proc else None
-        tab["busy"] = bool(proc) and proc.argv0 in LIVE_AGENTS
+        tab["busy"] = is_busy(proc)
     return tabs
 
 
@@ -67,13 +84,24 @@ def match_window(snap: dict, live: list[dict], window_index: int) -> dict | None
     }
     if not live_titles:
         return None
-    best, best_score = None, 0
+    scored = []
     for window in snap.get("windows", []):
         titles = {t["title"].strip() for t in window.get("tabs", []) if t["title"].strip()}
         score = len(titles & live_titles)
-        if score > best_score:
-            best, best_score = window, score
-    return best if best_score else None
+        if score:
+            scored.append((score, window))
+    if not scored:
+        return None
+    best_score = max(score for score, _ in scored)
+    tied = [window for score, window in scored if score == best_score]
+    if len(tied) > 1:
+        # Silently picking one would replay the wrong window's sessions.
+        raise Ambiguous(
+            "This window matches "
+            + " and ".join(f"snapshot window {w['window_index']}" for w in tied)
+            + " equally well. Pass the window number explicitly."
+        )
+    return tied[0]
 
 
 def select_window(snap: dict, number: int | None, live: list[dict]) -> tuple[dict, str]:
