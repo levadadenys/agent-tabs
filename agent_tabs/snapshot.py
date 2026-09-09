@@ -15,8 +15,9 @@ LATEST = STATE_DIR / "snapshot.json"
 HISTORY_DIR = STATE_DIR / "history"
 HISTORY_KEEP = 60
 
-AGENT_KINDS = {"claude", "codex", "grok"}
-AGENT_NAMES = frozenset(adapters.AGENT_RESOLVERS)
+# Both derive from adapters, which owns the definition of "is an agent".
+AGENT_KINDS = adapters.AGENT_KINDS
+AGENT_NAMES = adapters.AGENT_KINDS
 SCHEMA_VERSION = 1
 
 
@@ -75,7 +76,9 @@ def agent_tab_count(snap: dict) -> int:
 
 
 def _write_atomic(path: Path, snap: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    # Snapshots hold every tab's command line, which can include credentials
+    # passed on another tab's argv; keep the directory owner-only too.
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as handle:
@@ -99,7 +102,8 @@ def save(snap: dict) -> tuple[Path | None, Path]:
     at least one agent session, so a capture taken while iTerm is shutting down
     cannot overwrite a good snapshot with an empty one.
     """
-    stamp = snap["captured_at"].replace(":", "").replace("-", "")
+    # Microseconds: two captures in the same second must not collide.
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
     archive = HISTORY_DIR / f"{stamp}.json"
     _write_atomic(archive, snap)
     _prune_history()
