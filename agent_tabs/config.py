@@ -16,7 +16,7 @@ CONFIG_PATH = STATE_DIR / "config.json"
 DEFAULTS: dict = {
     # Maps an absolute CODEX_HOME to the command that selects that Codex
     # account, for people who run more than one. Example:
-    #   {"/Users/me/.codex-work": "codex work"}
+    #   {"/Users/you/.codex-work": "codex work"}
     "codex_profiles": {},
 }
 
