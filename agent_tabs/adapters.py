@@ -151,10 +151,12 @@ def resolve_command(proc: procs.Proc, cwd: str | None) -> dict:
     kind = "ssh" if proc.argv0 == "ssh" else "command"
     if set(proc.command) & SHELL_METACHARACTERS:
         result = _result(kind, None, cwd, "")
-        result["warning"] = (
+        note = (
             "command contains shell syntax and was not replayed; "
             f"run it yourself if you trust it: {proc.command}"
         )
+        # Keep any cwd warning too rather than replacing it.
+        result["warning"] = f"{result['warning']}; {note}" if result["warning"] else note
         return result
     return _result(kind, None, cwd, proc.command)
 
