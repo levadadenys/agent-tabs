@@ -42,7 +42,8 @@ scan_range() {
     # gitleaks exits 0 when its own git invocation fails, so a bad range would
     # otherwise read as "clean". Treat scanning nothing we expected to scan as
     # a failure, not a pass.
-    if echo "$output" | grep -q "0 commits scanned" ; then
+    # Anchored so "10 commits scanned" is not read as "0 commits scanned".
+    if echo "$output" | grep -qE '(^|[^0-9])0 commits scanned' ; then
         fail "gitleaks scanned no commits for range '$1' (expected $count)." \
              "$(echo "$output" | grep -i 'err' | head -3)" \
              "Refusing rather than trusting an empty scan."
@@ -51,7 +52,7 @@ scan_range() {
     if [ "$status" -ne 0 ]; then
         echo "pre-push: gitleaks found secrets or personal paths in the commits" >&2
         echo "          being pushed:" >&2
-        echo "$output" | grep -vE '^\s*$' | tail -25 >&2
+        echo "$output" | grep -vE '^[[:space:]]*$' | tail -25 >&2
         echo "" >&2
         echo "          Use /Users/you in examples. Machine-specific values" >&2
         echo "          belong in ~/.agent-tabs/config.json, outside the repo." >&2
