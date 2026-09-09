@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""agent-tabs -- snapshot and restore iTerm tabs full of agent sessions."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from agent_tabs import iterm, restore as restore_mod, snapshot as snap_mod  # noqa: E402
+
+KIND_MARK = {"claude": "C", "codex": "X", "grok": "G", "ssh": "S", "shell": ".", "command": ">"}
+
+
+def cmd_snapshot(args) -> int:
+    if not iterm.is_running():
+        print("iTerm2 is not running; nothing to capture.", file=sys.stderr)
+        return 1
+    snap = snap_mod.build()
+    latest, archive = snap_mod.save(snap)
+    agents = snap_mod.agent_tab_count(snap)
+    tabs = sum(len(w["tabs"]) for w in snap["windows"])
+    where = latest or archive
+    if args.quiet:
+        return 0
+    print(f"{len(snap['windows'])} windows, {tabs} tabs, {agents} agent sessions -> {where}")
+    if latest is None:
+        print("No agent sessions found; kept the previous snapshot.json.")
+    return 0
+
+
+def _print_window(window: dict) -> None:
+    print(f"\nWindow {window['window_index']}  ({len(window['tabs'])} tabs)")
+    for tab in window["tabs"]:
+        mark = KIND_MARK.get(tab.get("kind"), "?")
+        title = (tab.get("title") or "").strip() or "(untitled)"
+        print(f"  [{mark}] tab {tab['tab_index']:>2}  {title[:64]}")
+        if tab.get("restore"):
+            print(f"          {tab['restore']}")
+
+
+def cmd_list(args) -> int:
+    snap = snap_mod.load(Path(args.file) if args.file else None)
+    print(f"Snapshot captured {snap['captured_at']}  ({snap_mod.agent_tab_count(snap)} agent sessions)")
+    for window in snap["windows"]:
+        _print_window(window)
+    print("\nRestore a window with:  agent-tabs restore <window-number> --go")
+    return 0
+
+
+def cmd_restore(args) -> int:
+    snap = snap_mod.load(Path(args.file) if args.file else None)
+    live = restore_mod.live_tabs()
+    try:
+        window, how = restore_mod.select_window(snap, args.window, live)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    if args.new_window:
+        target = None
+        target_label = "a new window"
+    else:
+        target = restore_mod.current_window_index(live)
+        if target is None:
+            print(
+                "Not running inside an iTerm tab, so there is no current window to fill.\n"
+                "Re-run from an iTerm tab, or pass --new-window.",
+                file=sys.stderr,
+            )
+            return 2
+        target_label = f"live window {target}"
+
+    actions = restore_mod.plan(window, live, target, args.force)
+    runnable = [a for a in actions if a.will_run]
+
+    print(f"Restoring {how} into {target_label}\n")
+    for action in actions:
+        if action.will_run:
+            print(f"  tab {action.tab_index:>2}  {action.command}")
+        else:
+            print(f"  tab {action.tab_index:>2}  SKIP ({action.skip_reason})")
+
+    if not args.go:
+        print(f"\nDry run. {len(runnable)} tabs would start. Add --go to execute.")
+        return 0
+    if not runnable:
+        print("\nNothing to do.")
+        return 0
+
+    if target is None:
+        target = iterm.create_window(max(a.tab_index for a in runnable))
+    ran = restore_mod.execute(actions, target)
+    print(f"\nStarted {ran} tabs in window {target}.")
+    return 0
+
+
+def cmd_install(args) -> int:
+    from agent_tabs import install
+
+    return install.run(force=args.force)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="agent-tabs", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_snap = sub.add_parser("snapshot", help="capture the current window/tab map")
+    p_snap.add_argument("-q", "--quiet", action="store_true")
+    p_snap.set_defaults(func=cmd_snapshot)
+
+    p_list = sub.add_parser("list", help="show what the last snapshot holds")
+    p_list.add_argument("-f", "--file", help="read a specific snapshot file")
+    p_list.set_defaults(func=cmd_list)
+
+    p_restore = sub.add_parser("restore", help="replay a snapshot window into tabs")
+    p_restore.add_argument("window", nargs="?", type=int, help="snapshot window number")
+    p_restore.add_argument("-f", "--file", help="read a specific snapshot file")
+    p_restore.add_argument("--go", action="store_true", help="actually run (default is a dry run)")
+    p_restore.add_argument("--new-window", action="store_true", help="build a fresh window")
+    p_restore.add_argument("--force", action="store_true", help="overwrite tabs already running an agent")
+    p_restore.set_defaults(func=cmd_restore)
+
+    p_install = sub.add_parser("install", help="install the iTerm2 AutoLaunch recorder")
+    p_install.add_argument("--force", action="store_true", help="overwrite an existing install")
+    p_install.set_defaults(func=cmd_install)
+
+    args = parser.parse_args()
+    try:
+        return args.func(args)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except iterm.ITermError as exc:
+        print(f"iTerm error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
