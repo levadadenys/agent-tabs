@@ -1,0 +1,22 @@
+# Secret scanning config for gitleaks (https://gitleaks.io).
+#
+# The default rules cover credentials. These two add what matters for a repo
+# that is intended to become public: machine-specific paths and personal email
+# addresses, neither of which the defaults look for.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "personal-home-path"
+description = "Home directory path — examples must use /Users/you"
+regex = '''/Users/[A-Za-z0-9._-]+'''
+  [rules.allowlist]
+  # RE2 has no lookahead, so the placeholder is allowed here rather than
+  # excluded in the pattern.
+  regexTarget = "match"
+  regexes = ['''^/Users/you$''']
+
+[[rules]]
+id = "personal-email"
+description = "Personal email at a consumer provider"
+regex = '''[A-Za-z0-9._%+-]+@(gmail|googlemail|icloud|yahoo|hotmail|outlook)\.[A-Za-z]{2,}'''
