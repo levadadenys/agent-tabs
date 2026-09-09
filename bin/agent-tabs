@@ -9,9 +9,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import iterm, restore as restore_mod, snapshot as snap_mod  # noqa: E402
+from agent_tabs import adapters, iterm, restore as restore_mod, snapshot as snap_mod  # noqa: E402
 
-KIND_MARK = {"claude": "C", "codex": "X", "grok": "G", "ssh": "S", "shell": ".", "command": ">"}
+KIND_MARK = {"claude": "C", "codex": "X", "grok": "G", "ssh": "S",
+             "shell": ".", "command": ">", "empty": " "}
 
 
 def cmd_snapshot(args) -> int:
@@ -21,7 +22,8 @@ def cmd_snapshot(args) -> int:
     snap = snap_mod.build()
     latest, archive = snap_mod.save(snap)
     agents = snap_mod.agent_tab_count(snap)
-    tabs = sum(len(w["tabs"]) for w in snap["windows"])
+    # Rows are per-pane; a split tab contributes several. Count real tabs.
+    tabs = sum(len({t["tab_index"] for t in w["tabs"]}) for w in snap["windows"])
     where = latest or archive
     if args.quiet:
         return 0
@@ -32,13 +34,18 @@ def cmd_snapshot(args) -> int:
 
 
 def _print_window(window: dict, tabs: list[dict]) -> None:
-    print(f"\nWindow {window['window_index']}  ({len(tabs)} tabs)")
+    print(f"\nWindow {window['window_index']}  ({len({t['tab_index'] for t in tabs})} tabs)")
     for tab in tabs:
         mark = KIND_MARK.get(tab.get("kind"), "?")
         title = (tab.get("title") or "").strip() or "(untitled)"
-        print(f"  [{mark}] tab {tab['tab_index']:>2}  {title[:64]}")
+        # Only the first pane of a tab is ever recreated; label the rest so the
+        # listing cannot be mistaken for a set of separately restorable tabs.
+        pane = "" if tab.get("pane_index", 1) == 1 else f" (pane {tab['pane_index']}, not restored)"
+        print(f"  [{mark}] tab {tab['tab_index']:>2}  {title[:64]}{pane}")
         if tab.get("restore"):
             print(f"          {tab['restore']}")
+        if tab.get("warning"):
+            print(f"          !! {tab['warning']}")
 
 
 def cmd_list(args) -> int:
@@ -52,7 +59,12 @@ def cmd_list(args) -> int:
 
     if args.commands:
         for window in snap["windows"]:
+            seen = set()
             for tab in window["tabs"]:
+                # Mirror restore: one command per tab, the first pane.
+                if tab["tab_index"] in seen:
+                    continue
+                seen.add(tab["tab_index"])
                 if keep(tab) and tab.get("restore"):
                     print(tab["restore"])
         return 0
@@ -77,7 +89,7 @@ def cmd_restore(args) -> int:
     live = restore_mod.live_tabs()
     try:
         window, how = restore_mod.select_window(snap, args.window, live)
-    except ValueError as exc:
+    except ValueError as exc:  # includes restore_mod.Ambiguous
         print(str(exc), file=sys.stderr)
         return 2
 
@@ -98,12 +110,21 @@ def cmd_restore(args) -> int:
     actions = restore_mod.plan(window, live, target, args.force)
     runnable = [a for a in actions if a.will_run]
 
+    # Staleness matters most in exactly the situation this command is used in:
+    # a recorder that died hours ago looks identical to a healthy one.
+    print(f"Snapshot captured {snap['captured_at']}")
     print(f"Restoring {how} into {target_label}\n")
+    warnings = {
+        t["tab_index"]: t["warning"]
+        for t in window.get("tabs", []) if t.get("warning")
+    }
     for action in actions:
         if action.will_run:
             print(f"  tab {action.tab_index:>2}  {action.command}")
         else:
             print(f"  tab {action.tab_index:>2}  SKIP ({action.skip_reason})")
+        if action.tab_index in warnings:
+            print(f"          !! {warnings[action.tab_index]}")
 
     if not args.go:
         print(f"\nDry run. {len(runnable)} tabs would start. Add --go to execute.")
@@ -137,7 +158,7 @@ def main() -> int:
     p_list.add_argument("-f", "--file", help="read a specific snapshot file")
     p_list.add_argument(
         "-k", "--kind", action="append",
-        choices=["claude", "codex", "grok", "ssh", "shell", "command"],
+        choices=list(adapters.ALL_KINDS),
         help="only show tabs of this kind (repeatable)",
     )
     p_list.add_argument(
