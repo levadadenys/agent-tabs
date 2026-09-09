@@ -19,6 +19,11 @@ UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
 
+# Characters that make a shell do something other than run one command. A
+# recorded command line is replayed verbatim, so anything carrying these is not
+# safe to type into a shell unattended.
+SHELL_METACHARACTERS = set(";&|<>`$()\n\r\\!*?{}[]\"'")
+
 HOME = Path.home()
 CLAUDE_SESSIONS = HOME / ".claude" / "sessions"
 GROK_SESSIONS = HOME / ".grok" / "sessions"
@@ -31,6 +36,25 @@ def _cd(cwd: str | None) -> str:
 def _join(cwd: str | None, command: str) -> str:
     prefix = _cd(cwd)
     return f"{prefix} && {command}" if prefix else command
+
+
+def _result(kind: str, session_id: str | None, cwd: str | None, command: str) -> dict:
+    """Uniform adapter result, with a warning when the command is not trustworthy.
+
+    A resume run from the wrong directory reports the session as missing, so a
+    command with no `cd` is worse than useless -- it looks right and fails. Say
+    so rather than emitting it silently.
+    """
+    warning = None
+    if command and not cwd:
+        warning = "working directory unknown - resume is cwd-scoped and will likely fail"
+    return {
+        "kind": kind,
+        "session_id": session_id,
+        "cwd": cwd,
+        "restore": _join(cwd, command) if command else _cd(cwd),
+        "warning": warning,
+    }
 
 
 def resolve_claude(proc: procs.Proc, cwd: str | None) -> dict:
@@ -50,9 +74,13 @@ def resolve_claude(proc: procs.Proc, cwd: str | None) -> dict:
         match = UUID_RE.search(proc.command)
         if match:
             session_id = match.group(0)
+    # The id is interpolated into a command that gets typed into a shell, so it
+    # must be a UUID and nothing else -- including when it came from the JSON
+    # pointer file, which is not ours to trust.
+    if session_id and not UUID_RE.fullmatch(session_id):
+        session_id = None
     command = f"claude --resume {session_id}" if session_id else "claude"
-    return {"kind": "claude", "session_id": session_id, "cwd": cwd,
-            "restore": _join(cwd, command)}
+    return _result("claude", session_id, cwd, command)
 
 
 def resolve_codex(proc: procs.Proc, cwd: str | None) -> dict:
@@ -78,17 +106,19 @@ def resolve_codex(proc: procs.Proc, cwd: str | None) -> dict:
         if match:
             session_id = match.group(0)
 
+    if session_id and not UUID_RE.fullmatch(session_id):
+        session_id = None
     # Which command selects a given account is installation-specific.
     binary = config.codex_command(codex_home)
     command = f"{binary} resume {session_id}" if session_id else binary
-    return {"kind": "codex", "session_id": session_id, "cwd": cwd,
-            "restore": _join(cwd, command)}
+    return _result("codex", session_id, cwd, command)
 
 
 def resolve_grok(proc: procs.Proc, cwd: str | None) -> dict:
     """Grok stores sessions under ~/.grok/sessions/<urlencoded-cwd>/<uuid>/."""
     session_id = None
-    root = str(GROK_SESSIONS)
+    # Trailing separator so a sibling like ~/.grok/sessions-archive cannot match.
+    root = str(GROK_SESSIONS) + "/"
     for path in procs.open_files(proc.pid):
         if not path.startswith(root):
             continue
@@ -104,21 +134,35 @@ def resolve_grok(proc: procs.Proc, cwd: str | None) -> dict:
         match = UUID_RE.search(proc.command)
         if match:
             session_id = match.group(0)
+    if session_id and not UUID_RE.fullmatch(session_id):
+        session_id = None
     command = f"grok --resume {session_id}" if session_id else "grok"
-    return {"kind": "grok", "session_id": session_id, "cwd": cwd,
-            "restore": _join(cwd, command)}
+    return _result("grok", session_id, cwd, command)
 
 
 def resolve_command(proc: procs.Proc, cwd: str | None) -> dict:
-    """ssh, and anything else long-running: replay the command verbatim."""
+    """ssh, and anything else long-running: replay the command verbatim.
+
+    A recorded command line is typed into a live shell and submitted, so it is
+    only replayed when it is a plain argument list. Anything carrying shell
+    syntax is recorded but downgraded to a bare `cd`, because argv is data an
+    arbitrary process controls and this runs unattended, long after capture.
+    """
     kind = "ssh" if proc.argv0 == "ssh" else "command"
-    return {"kind": kind, "session_id": None, "cwd": cwd,
-            "restore": _join(cwd, proc.command)}
+    if set(proc.command) & SHELL_METACHARACTERS:
+        result = _result(kind, None, cwd, "")
+        result["warning"] = (
+            "command contains shell syntax and was not replayed; "
+            f"run it yourself if you trust it: {proc.command}"
+        )
+        return result
+    return _result(kind, None, cwd, proc.command)
 
 
 def resolve_shell(proc: procs.Proc, cwd: str | None) -> dict:
     """A tab sitting at a prompt: restore its directory, run nothing."""
-    return {"kind": "shell", "session_id": None, "cwd": cwd, "restore": _cd(cwd)}
+    return {"kind": "shell", "session_id": None, "cwd": cwd,
+            "restore": _cd(cwd), "warning": None}
 
 
 AGENT_RESOLVERS = {
@@ -127,10 +171,17 @@ AGENT_RESOLVERS = {
     "grok": resolve_grok,
 }
 
+# The one place that defines what counts as an agent. Everything else derives
+# from this: undercounting here would let an empty capture overwrite a good
+# snapshot, and a missing entry would let restore clobber a live session.
+AGENT_KINDS = frozenset(AGENT_RESOLVERS)
+ALL_KINDS = tuple(AGENT_RESOLVERS) + ("ssh", "command", "shell", "empty")
+
 
 def resolve(proc: procs.Proc | None, cwd: str | None) -> dict:
     if proc is None:
-        return {"kind": "empty", "session_id": None, "cwd": cwd, "restore": ""}
+        return {"kind": "empty", "session_id": None, "cwd": cwd,
+                "restore": "", "warning": None}
     resolver = AGENT_RESOLVERS.get(proc.argv0)
     if resolver:
         return resolver(proc, cwd)
