@@ -53,6 +53,8 @@ Restart iTerm2 to start recording. Verify with `agent-tabs list`.
 
 ```bash
 agent-tabs list                 # what the last snapshot holds
+agent-tabs list --kind codex    # only Codex tabs (filters on kind, not title)
+agent-tabs list --commands      # bare restore commands, one per line
 agent-tabs restore              # dry run, auto-matching the current window
 agent-tabs restore 2            # dry run for snapshot window 2
 agent-tabs restore 2 --go       # actually start the tabs

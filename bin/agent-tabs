@@ -31,9 +31,9 @@ def cmd_snapshot(args) -> int:
     return 0
 
 
-def _print_window(window: dict) -> None:
-    print(f"\nWindow {window['window_index']}  ({len(window['tabs'])} tabs)")
-    for tab in window["tabs"]:
+def _print_window(window: dict, tabs: list[dict]) -> None:
+    print(f"\nWindow {window['window_index']}  ({len(tabs)} tabs)")
+    for tab in tabs:
         mark = KIND_MARK.get(tab.get("kind"), "?")
         title = (tab.get("title") or "").strip() or "(untitled)"
         print(f"  [{mark}] tab {tab['tab_index']:>2}  {title[:64]}")
@@ -43,9 +43,31 @@ def _print_window(window: dict) -> None:
 
 def cmd_list(args) -> int:
     snap = snap_mod.load(Path(args.file) if args.file else None)
+    wanted = set(args.kind or [])
+
+    def keep(tab: dict) -> bool:
+        # Filter on the resolved kind, never on the tab title -- a title is
+        # whatever the agent last wrote to the terminal and may say anything.
+        return not wanted or tab.get("kind") in wanted
+
+    if args.commands:
+        for window in snap["windows"]:
+            for tab in window["tabs"]:
+                if keep(tab) and tab.get("restore"):
+                    print(tab["restore"])
+        return 0
+
     print(f"Snapshot captured {snap['captured_at']}  ({snap_mod.agent_tab_count(snap)} agent sessions)")
+    shown = 0
     for window in snap["windows"]:
-        _print_window(window)
+        tabs = [t for t in window["tabs"] if keep(t)]
+        if not tabs:
+            continue
+        shown += len(tabs)
+        _print_window(window, tabs)
+    if wanted and not shown:
+        print(f"\nNo tabs of kind: {', '.join(sorted(wanted))}")
+        return 0
     print("\nRestore a window with:  agent-tabs restore <window-number> --go")
     return 0
 
@@ -113,6 +135,15 @@ def main() -> int:
 
     p_list = sub.add_parser("list", help="show what the last snapshot holds")
     p_list.add_argument("-f", "--file", help="read a specific snapshot file")
+    p_list.add_argument(
+        "-k", "--kind", action="append",
+        choices=["claude", "codex", "grok", "ssh", "shell", "command"],
+        help="only show tabs of this kind (repeatable)",
+    )
+    p_list.add_argument(
+        "--commands", action="store_true",
+        help="print bare restore commands, one per line",
+    )
     p_list.set_defaults(func=cmd_list)
 
     p_restore = sub.add_parser("restore", help="replay a snapshot window into tabs")
