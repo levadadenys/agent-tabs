@@ -137,20 +137,3 @@ def open_files(pid: int) -> list[str]:
         check=False,
     ).stdout
     return [line[1:] for line in out.splitlines() if line.startswith("n")]
-
-
-def environ_of(pid: int) -> dict[str, str]:
-    """Best-effort read of a process's environment (macOS `ps eww`)."""
-    out = subprocess.run(
-        ["ps", "eww", "-o", "command=", "-p", str(pid)],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout
-    env: dict[str, str] = {}
-    for token in out.split():
-        if "=" in token:
-            key, _, value = token.partition("=")
-            if key.isupper() and key.replace("_", "").isalnum():
-                env[key] = value
-    return env

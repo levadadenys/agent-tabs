@@ -56,23 +56,30 @@ def resolve_claude(proc: procs.Proc, cwd: str | None) -> dict:
 
 
 def resolve_codex(proc: procs.Proc, cwd: str | None) -> dict:
-    """Codex has no pid pointer, but holds its rollout transcript open."""
+    """Codex has no pid pointer, but holds its rollout transcript open.
+
+    That open path also identifies the account: rollouts live at
+    <CODEX_HOME>/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl, so the
+    prefix before /sessions/ is the CODEX_HOME. Reading the process environment
+    would be the obvious route but macOS does not expose it -- `ps eww` returns
+    the command line only.
+    """
     session_id = None
+    codex_home = None
     for path in procs.open_files(proc.pid):
         if "/sessions/" in path and path.endswith(".jsonl"):
             match = UUID_RE.search(os.path.basename(path))
             if match:
                 session_id = match.group(0)
+                codex_home = path.split("/sessions/")[0]
                 break
     if not session_id:
         match = UUID_RE.search(proc.command)
         if match:
             session_id = match.group(0)
 
-    # Multiple Codex accounts are selected by CODEX_HOME; the command that
-    # picks a given one is installation-specific, so it comes from config.
-    env = procs.environ_of(proc.pid)
-    binary = config.codex_command(env.get("CODEX_HOME"))
+    # Which command selects a given account is installation-specific.
+    binary = config.codex_command(codex_home)
     command = f"{binary} resume {session_id}" if session_id else binary
     return {"kind": "codex", "session_id": session_id, "cwd": cwd,
             "restore": _join(cwd, command)}
