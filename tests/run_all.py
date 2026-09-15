@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Run every test module and report a single verdict."""
 
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -11,9 +13,23 @@ HERE = Path(__file__).resolve().parent
 def main() -> int:
     failures, total = [], 0
     for path in sorted(HERE.glob("test_*.py")):
-        result = subprocess.run(
-            [sys.executable, str(path)], capture_output=True, text=True
-        )
+        # Each run gets a private, empty bytecode cache. Mutation testing edits
+        # a file, runs the tests, then restores it; when the edit is the same
+        # byte length and the mtime matches, Python's mtime+size check passes
+        # and it loads the STALE mutant. Observed: source read
+        # ENUMERATE_ATTEMPTS = 3 while Python had loaded 1.
+        #
+        # -B alone does NOT fix this -- it only stops *writing* .pyc files,
+        # while import still reads an existing valid one. Verified: with -B the
+        # stale value is still loaded. A fresh cache prefix is what works.
+        with tempfile.TemporaryDirectory() as cache:
+            env = {**os.environ, "PYTHONPYCACHEPREFIX": cache}
+            result = subprocess.run(
+                [sys.executable, str(path)],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
         passed = result.stdout.count("PASS ")
         failed = result.stdout.count("FAIL ")
         total += passed + failed

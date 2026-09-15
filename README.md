@@ -40,14 +40,24 @@ git clone https://github.com/<you>/agent-tabs.git
 cd agent-tabs && ./bin/agent-tabs install
 ```
 
-That symlinks three things:
+That does three things:
 
-- the recorder into iTerm2's `Scripts/AutoLaunch/`, so it runs for exactly as
-  long as iTerm is open — no launchd plist, no daemon when iTerm is closed
-- `agent-tabs` into `~/.local/bin`
-- a `resume-tabs` skill into `~/.claude/skills`
+- installs the recorder as a **launchd agent** that captures every 30s
+- links `agent-tabs` into `~/.local/bin`
+- links a `resume-tabs` skill into `~/.claude/skills`
 
-Restart iTerm2 to start recording. Verify with `agent-tabs list`.
+No iTerm restart is needed, and recording continues across iTerm restarts.
+Verify with `agent-tabs list` — the timestamp should be seconds old.
+
+```bash
+launchctl list | grep agent-tabs                      # is it registered
+launchctl bootout gui/$UID/com.agent-tabs.recorder     # stop it
+```
+
+An earlier version ran the recorder from iTerm2's `Scripts/AutoLaunch/` folder.
+That needed iTerm's Python runtime, which is not installed by default, so it
+could fail silently — and did, for six days. `install` removes that old symlink
+if it finds one.
 
 ## Use
 
@@ -113,6 +123,18 @@ overwrite a good snapshot with an empty one.
 ```bash
 python3 tests/run_all.py
 ```
+
+Each module runs with a private, empty bytecode cache
+(`PYTHONPYCACHEPREFIX`). That matters for mutation testing: edit a file, run the
+tests, restore it — and if the edit was the same byte length with a matching
+mtime, Python's mtime+size check passes and the tests keep running the stale
+mutant. Seen in practice, with the source reading `ENUMERATE_ATTEMPTS = 3` while
+Python had loaded `1`.
+
+`-B` does **not** fix this. It only stops Python *writing* `.pyc` files; import
+still reads an existing valid one, and the stale value is still loaded —
+verified. When mutating by hand outside this runner, set
+`PYTHONPYCACHEPREFIX=$(mktemp -d)` or delete `__pycache__`.
 
 No test framework and no dependencies. The tests deliberately drive real call
 sites: the Codex account test spawns a real process holding a real rollout file
