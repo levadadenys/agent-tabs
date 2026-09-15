@@ -18,7 +18,9 @@ REMOTE_NAME="${1:-origin}"
 REMOTE_TARGET="${2:-$REMOTE_NAME}"
 ROOT=$(git rev-parse --show-toplevel)
 CONFIG="$ROOT/.gitleaks.toml"
-ZERO="0000000000000000000000000000000000000000"
+# Null object id: 40 zeros under sha1, 64 under sha256.
+ZERO=$(git hash-object --stdin </dev/null 2>/dev/null | tr '0-9a-f' '0')
+[ -z "$ZERO" ] && ZERO="0000000000000000000000000000000000000000"
 
 fail() {
     echo "pre-push: $1" >&2
@@ -58,8 +60,19 @@ scan_tree() {
             rm -rf "$tmp" "$tmp.paths"
             fail "could not read $path from $1." "Refusing rather than skipping the scan."
         fi
+        printf 'x' >> "$tmp.count"
     done < "$tmp.paths"
-    rm -f "$tmp.paths"
+
+    # Confirm every listed path was materialised: a truncated read would
+    # otherwise leave gitleaks scanning a partial tree and calling it clean.
+    expected=$(tr -cd '\0' < "$tmp.paths" | wc -c | tr -d ' ')
+    actual=$(wc -c < "$tmp.count" 2>/dev/null | tr -d ' ')
+    rm -f "$tmp.paths" "$tmp.count"
+    if [ "${actual:-0}" -ne "${expected:-0}" ]; then
+        rm -rf "$tmp"
+        fail "materialised ${actual:-0} of ${expected:-0} paths for $1." \
+             "Refusing rather than scanning a partial tree."
+    fi
 
     if ! gitleaks dir "$tmp" --no-banner --redact --config "$CONFIG" \
             >/dev/null 2>&1; then
