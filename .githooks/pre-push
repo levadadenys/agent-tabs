@@ -49,7 +49,11 @@ scan_tree() {
 
     while IFS= read -r -d '' path; do
         [ -z "$path" ] && continue
-        mkdir -p "$tmp/$(dirname "$path")" 2>/dev/null || continue
+        if ! mkdir -p "$tmp/$(dirname "$path")" 2>/dev/null; then
+            rm -rf "$tmp" "$tmp.paths"
+            fail "could not materialise $path from $1." \
+                 "Refusing rather than scanning a partial tree."
+        fi
         if ! git cat-file blob "$1:$path" > "$tmp/$path" 2>/dev/null; then
             rm -rf "$tmp" "$tmp.paths"
             fail "could not read $path from $1." "Refusing rather than skipping the scan."
@@ -106,7 +110,10 @@ scan_range() {
     # Only when there was something to scan: gitleaks skips commits with no
     # file changes, so a range of empty commits legitimately reports zero and
     # must not be refused.
-    touched=$(git log --format= --name-only $1 2>/dev/null | grep -c . || true)
+    # -m to match the scan below: without it a merge whose changes show only
+    # against one parent counts as touching nothing, and the guard would let a
+    # genuinely broken "0 commits scanned" through.
+    touched=$(git log --format= --name-only -m $1 2>/dev/null | grep -c . || true)
     if [ "${touched:-0}" -gt 0 ] && echo "$output" | grep -qE '(^|[^0-9])0 commits scanned' ; then
         fail "gitleaks scanned no commits for range '$1' (expected $count)." \
              "$(echo "$output" | grep -i 'err' | head -3)" \
@@ -131,25 +138,37 @@ scan_range() {
 # full history rather than silently narrowing.
 remote_exclusions() {
     # Bounded: an unreachable remote would otherwise hang every push, and a
-    # hook that hangs gets --no-verify'd into irrelevance. On timeout this
-    # yields nothing, which widens the scan rather than narrowing it.
-    # All advertised refs, not just heads: a commit kept reachable only by a tag
-    # is already published, and excluding it avoids rescanning old history.
-    ( git ls-remote "$REMOTE_TARGET" 2>/dev/null &
+    # hook that hangs gets --no-verify'd into irrelevance.
+    #
+    # The status is checked explicitly rather than read off a pipeline, whose
+    # exit code belongs to the last stage: partial output from a failing
+    # ls-remote would otherwise become exclusions and narrow the scan. On any
+    # failure this yields nothing, widening the scan instead.
+    refs_file=$(mktemp) || return 0
+    ( git ls-remote "$REMOTE_TARGET" > "$refs_file" 2>/dev/null &
       lsr=$!
       ( sleep 10; kill "$lsr" 2>/dev/null ) 2>/dev/null &
       watcher=$!
       wait "$lsr" 2>/dev/null
+      status=$?
       kill "$watcher" 2>/dev/null
-    ) | awk '{print $1}' | \
-    while read -r sha; do
+      exit "$status"
+    )
+    if [ $? -ne 0 ]; then
+        rm -f "$refs_file"
+        return 0
+    fi
+
+    awk '{print $1}' "$refs_file" | while read -r sha; do
         # Peel: an annotated tag's sha is a tag object, not a commit.
         commit=$(git rev-parse --quiet --verify "${sha}^{commit}" 2>/dev/null)
         if [ -n "$commit" ]; then
             printf '^%s\n' "$commit"
         fi
     done | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+    rm -f "$refs_file"
 }
+
 
 # `|| [ -n "$remote_ref" ]` handles a final line with no trailing newline. Git
 # always terminates it, but a guard that silently no-ops on malformed input
