@@ -14,7 +14,10 @@ regex = '''/Users/[A-Za-z0-9._-]+'''
   # RE2 has no lookahead, so the placeholder is allowed here rather than
   # excluded in the pattern.
   regexTarget = "match"
-  regexes = ['''^/Users/you$''']
+  # Both are documented placeholders. /Users/me appears in earlier history and
+  # is not a real path; allowlisting it keeps old commits from tripping a scan
+  # of a new branch forever.
+  regexes = ['''^/Users/you$''', '''^/Users/me$''']
 
 [[rules]]
 id = "personal-email"

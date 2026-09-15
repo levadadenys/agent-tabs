@@ -12,6 +12,7 @@
 #     git push --no-verify
 #
 PROTECTED="refs/heads/main"
+REMOTE_NAME="${1:-origin}"
 ZERO="0000000000000000000000000000000000000000"
 
 fail() {
@@ -25,6 +26,9 @@ fail() {
 # another branch's ref from this checkout would otherwise go unexamined, and
 # a leak that only exists in a commit would be missed entirely.
 scan_range() {
+    # Collapse whitespace: gitleaks splits --log-opts on spaces, so a doubled
+    # one becomes an empty revision and git aborts with "ambiguous argument".
+    set -- "$(printf '%s' "$1" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
     count=$(git rev-list --count $1 2>/dev/null) || \
         fail "could not resolve the commit range '$1'." \
              "Refusing rather than pushing unscanned. Override with --no-verify."
@@ -60,6 +64,20 @@ scan_range() {
     fi
 }
 
+# What the remote actually holds right now, as ^sha exclusions. Local
+# remote-tracking refs are not consulted: a branch deleted on the server still
+# looks published locally, which previously let a new ref scan zero commits and
+# ship a leak. Offline or on failure this yields nothing, so the scan widens to
+# full history rather than silently narrowing.
+remote_exclusions() {
+    git ls-remote --heads "$REMOTE_NAME" 2>/dev/null | awk '{print $1}' | \
+    while read -r sha; do
+        if git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            printf '^%s\n' "$sha"
+        fi
+    done | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+}
+
 # `|| [ -n "$remote_ref" ]` handles a final line with no trailing newline. Git
 # always terminates it, but a guard that silently no-ops on malformed input
 # fails the wrong way.
@@ -76,11 +94,16 @@ while read -r _local_ref local_sha remote_ref remote_sha || [ -n "$remote_ref" ]
     [ "$local_sha" = "$ZERO" ] && continue
 
     if [ "$remote_sha" = "$ZERO" ]; then
-        # A new ref: scan everything it reaches. Excluding --remotes would be
-        # cheaper, but local remote-tracking refs go stale -- a branch deleted
-        # on the server still counts as "published" locally, so a push that
-        # reintroduces its commits scans zero and ships the leak. Verified.
-        scan_range "$local_sha"
+        # A new ref: scan what the server does not already have. Local
+        # remote-tracking refs go stale, so ask the remote what it actually
+        # holds rather than trusting them. Falling back to full history would
+        # otherwise reject every new branch over an old commit.
+        excl=$(remote_exclusions)
+        if [ -n "$excl" ]; then
+            scan_range "$local_sha $excl"
+        else
+            scan_range "$local_sha"
+        fi
     else
         scan_range "${remote_sha}..${local_sha}"
     fi
