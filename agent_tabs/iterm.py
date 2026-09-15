@@ -1,8 +1,8 @@
 """iTerm2 control via AppleScript.
 
-AppleScript is used rather than the iTerm2 Python API so that the same code
-path works from a plain shell and from an AutoLaunch script, with no dependency
-on iTerm's bundled Python environment.
+AppleScript is used rather than the iTerm2 Python API so that this works from
+any context -- a plain shell, or the launchd recorder -- with no dependency on
+iTerm's bundled Python runtime, which is not installed by default.
 """
 
 from __future__ import annotations
