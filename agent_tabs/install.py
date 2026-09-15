@@ -54,11 +54,17 @@ def main_checkout() -> Path:
     would leave the recorder silently dead the moment that worktree is removed,
     which is the failure mode this whole tool exists to avoid.
     """
-    result = subprocess.run(
-        ["git", "-C", str(REPO), "rev-parse", "--path-format=absolute",
-         "--git-common-dir"],
-        capture_output=True, text=True, check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(REPO), "rev-parse", "--path-format=absolute",
+             "--git-common-dir"],
+            capture_output=True, text=True, check=False,
+        )
+    except OSError:
+        # No git available (a zip download, a stripped PATH). The repo path we
+        # were imported from is the best answer, and is correct unless this is
+        # a worktree.
+        return REPO
     if result.returncode == 0 and result.stdout.strip():
         return Path(result.stdout.strip()).parent
     return REPO
@@ -70,7 +76,8 @@ def _launchctl(*args: str) -> subprocess.CompletedProcess:
     )
 
 
-def _install_agent() -> list[str]:
+def _install_agent() -> tuple[list[str], bool]:
+    """Returns its output lines and whether the recorder is actually loaded."""
     lines: list[str] = []
     cli = main_checkout() / "bin" / "agent-tabs"
     LOG.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -105,11 +112,11 @@ def _install_agent() -> list[str]:
         result = _launchctl("load", "-w", str(AGENT_PLIST))
     if result.returncode == 0:
         lines.append(f"recorder loaded, every {INTERVAL_SECONDS}s")
-    else:
-        lines.append(
-            f"FAILED to load the recorder: {(result.stderr or result.stdout).strip()}"
-        )
-    return lines
+        return lines, True
+    lines.append(
+        f"FAILED to load the recorder: {(result.stderr or result.stdout).strip()}"
+    )
+    return lines, False
 
 
 def run(force: bool = False) -> int:
@@ -117,7 +124,8 @@ def run(force: bool = False) -> int:
         _link(REPO / "bin" / "agent-tabs", BIN_DIR / "agent-tabs", force),
         _link(SKILL_SRC, SKILL_DST, force),
     ]
-    lines += _install_agent()
+    agent_lines, loaded = _install_agent()
+    lines += agent_lines
 
     if LEGACY_AUTOLAUNCH.is_symlink() or LEGACY_AUTOLAUNCH.exists():
         LEGACY_AUTOLAUNCH.unlink()
@@ -125,6 +133,18 @@ def run(force: bool = False) -> int:
 
     for line in lines:
         print(line)
+
+    if not loaded:
+        # The recorder not running is the whole failure this tool exists to
+        # prevent, so it must not exit 0 -- a bootstrap script checking $? would
+        # otherwise treat a dead recorder as a successful install.
+        print(
+            "\nThe recorder is NOT running, so nothing is being captured.\n"
+            f"Retry with:  launchctl bootstrap gui/{os.getuid()} {AGENT_PLIST}",
+            file=sys.stderr,
+        )
+        return 1
+
     print(
         "\nNo iTerm restart needed. Verify with:  agent-tabs list\n"
         f"Stop it with:  launchctl bootout gui/{os.getuid()}/{LABEL}"
