@@ -102,6 +102,26 @@ def test_a_recovery_resets_the_streak():
         assert m.load()["captured_at"] == "BACK"
 
 
+def test_a_gap_restarts_the_streak():
+    """Collapses either side of a zero capture are not consecutive.
+
+    This is the post-reboot path: shutdown collapses build the streak, iTerm
+    closes, and the first partial capture while sessions are being restored
+    would otherwise be promoted over the full snapshot.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp))
+        m.save(snap(22, "FULL"))
+        for i in range(m.COLLAPSE_STREAK - 1):
+            m.save(snap(3, f"shutdown{i}"))
+        m.save(snap(0, "iterm-closed"))
+        latest, _ = m.save(snap(3, "restoring"))
+        assert latest is None, (
+            "a partial capture after a gap was promoted over the full snapshot"
+        )
+        assert m.load()["captured_at"] == "FULL"
+
+
 def test_the_first_ever_capture_is_promoted():
     with tempfile.TemporaryDirectory() as tmp:
         m = fresh(Path(tmp))

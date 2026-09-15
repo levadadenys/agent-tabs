@@ -153,6 +153,11 @@ def save(snap: dict) -> tuple[Path | None, Path]:
 
     count = agent_tab_count(snap)
     if count == 0:
+        # Restart the streak: collapses either side of a gap are not
+        # consecutive. Without this, a shutdown's collapses carry across the
+        # zero captures while iTerm is closed, and the first partial capture
+        # after a reboot is promoted over the full snapshot.
+        _write_streak(0)
         return None, archive
 
     previous = 0
