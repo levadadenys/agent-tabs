@@ -6,6 +6,7 @@ import os
 import plistlib
 import signal
 import subprocess
+import time
 import sys
 from pathlib import Path
 
@@ -48,9 +49,12 @@ def _stop_legacy_processes() -> list[str]:
     except OSError:
         return []
 
+    target = str(LEGACY_AUTOLAUNCH)
     stopped = []
     for line in listing.splitlines():
-        if LEGACY_AUTOLAUNCH.name not in line:
+        # Match the full path, not the basename: an unrelated process whose
+        # command line merely mentions the script name must not be signalled.
+        if target not in line:
             continue
         pid_text = line.split(None, 1)[0]
         try:
@@ -61,9 +65,23 @@ def _stop_legacy_processes() -> list[str]:
             continue
         try:
             os.kill(pid, signal.SIGTERM)
-            stopped.append(f"stopped the old recorder still running as pid {pid}")
         except OSError as exc:
             stopped.append(f"could not stop the old recorder (pid {pid}): {exc}")
+            continue
+        # Wait for it to actually go: until it does, it is still capturing on
+        # its own timer alongside the new job, and the two race on snapshot.json.
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                break
+            time.sleep(0.1)
+        else:
+            stopped.append(
+                f"old recorder (pid {pid}) did not exit; it may still be capturing"
+            )
+            continue
+        stopped.append(f"stopped the old recorder still running as pid {pid}")
     return stopped
 
 

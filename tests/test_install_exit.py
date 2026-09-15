@@ -116,6 +116,25 @@ def test_a_running_legacy_recorder_is_stopped():
             proc.wait()
 
 
+def test_an_unrelated_process_with_the_same_basename_is_spared():
+    # Matching the basename would signal any process whose command line merely
+    # mentions the script -- including a real recorder while tests run.
+    import subprocess, tempfile, time
+    with Sandbox(0):
+        other_dir = tempfile.mkdtemp()
+        decoy = Path(other_dir) / install.LEGACY_AUTOLAUNCH.name
+        decoy.write_text("import time\ntime.sleep(30)\n")
+        proc = subprocess.Popen([sys.executable, str(decoy)])
+        time.sleep(0.5)
+        try:
+            install.run()
+            time.sleep(0.5)
+            assert proc.poll() is None, "an unrelated process was killed"
+        finally:
+            proc.kill()
+            proc.wait()
+
+
 def test_a_failed_load_leaves_the_legacy_recorder_alone():
     with Sandbox(1, "denied"):
         script = install.LEGACY_AUTOLAUNCH
