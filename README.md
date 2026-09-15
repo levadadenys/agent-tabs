@@ -114,6 +114,13 @@ overwrite a good snapshot with an empty one.
 python3 tests/run_all.py
 ```
 
+Runs each module with bytecode caching disabled. That matters for mutation
+testing: edit a file, run the tests, restore it — and if the edit was the same
+byte length and landed in the same second, Python's mtime+size cache check
+passes and the tests keep running the stale mutant. Seen in practice, with the
+source reading `ENUMERATE_ATTEMPTS = 3` while Python had loaded `1`. When
+mutating by hand outside this runner, use `python3 -B` or clear `__pycache__`.
+
 No test framework and no dependencies. The tests deliberately drive real call
 sites: the Codex account test spawns a real process holding a real rollout file
 and resolves it through a real `lsof`, and the snapshot tests exercise actual
