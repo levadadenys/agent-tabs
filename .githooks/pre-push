@@ -1,0 +1,228 @@
+#!/bin/sh
+# Guard the default branch, and keep secrets and personal paths out of a repo
+# that is intended to become public.
+#
+# GitHub branch protection needs a paid plan for private repositories, so this
+# is the local stand-in. Enable it once per clone:
+#
+#     git config core.hooksPath .githooks
+#
+# Bypass deliberately (merging a PR locally, say) with:
+#
+#     git push --no-verify
+#
+PROTECTED="refs/heads/main"
+# $1 is the remote name, $2 the destination URL. Prefer the URL: a remote
+# with a separate pushurl would otherwise be queried at the wrong repo.
+REMOTE_NAME="${1:-origin}"
+REMOTE_TARGET="${2:-$REMOTE_NAME}"
+ROOT=$(git rev-parse --show-toplevel)
+CONFIG="$ROOT/.gitleaks.toml"
+# Null object id: 40 zeros under sha1, 64 under sha256.
+ZERO=$(git hash-object --stdin </dev/null 2>/dev/null | tr '0-9a-f' '0')
+[ -z "$ZERO" ] && ZERO="0000000000000000000000000000000000000000"
+
+fail() {
+    echo "pre-push: $1" >&2
+    shift
+    for line in "$@"; do echo "          $line" >&2; done
+    exit 1
+}
+
+# Scan the commits actually being pushed rather than the working tree: pushing
+# another branch's ref from this checkout would otherwise go unexamined, and
+# a leak that only exists in a commit would be missed entirely.
+# Scan the tree a ref actually ships, not just the diffs that built it. Diff
+# scanning has blind spots (merge handling, empty commits); the final tree is
+# the ground truth for what lands on the remote.
+scan_tree() {
+    # Materialise the tree from git objects directly. `git archive` honours
+    # export-ignore in .gitattributes and would silently omit tracked files
+    # that the push still sends, so the "ground truth" scan would have a hole.
+    # Reading ls-tree/cat-file has no such filter, and needs no intermediate
+    # tarball that a tracked file could collide with.
+    tmp=$(mktemp -d) || fail "could not create a temp dir to scan the pushed tree." \
+                             "Refusing rather than skipping the scan."
+
+    if ! git ls-tree -r -z --name-only "$1" 2>/dev/null > "$tmp.paths"; then
+        rm -rf "$tmp" "$tmp.paths"
+        fail "could not list the tree for $1." "Refusing rather than skipping the scan."
+    fi
+
+    while IFS= read -r -d '' path; do
+        [ -z "$path" ] && continue
+        if ! mkdir -p "$tmp/$(dirname "$path")" 2>/dev/null; then
+            rm -rf "$tmp" "$tmp.paths"
+            fail "could not materialise $path from $1." \
+                 "Refusing rather than scanning a partial tree."
+        fi
+        if ! git cat-file blob "$1:$path" > "$tmp/$path" 2>/dev/null; then
+            rm -rf "$tmp" "$tmp.paths"
+            fail "could not read $path from $1." "Refusing rather than skipping the scan."
+        fi
+        printf 'x' >> "$tmp.count"
+    done < "$tmp.paths"
+
+    # Confirm every listed path was materialised: a truncated read would
+    # otherwise leave gitleaks scanning a partial tree and calling it clean.
+    expected=$(tr -cd '\0' < "$tmp.paths" | wc -c | tr -d ' ')
+    actual=$(wc -c < "$tmp.count" 2>/dev/null | tr -d ' ')
+    rm -f "$tmp.paths" "$tmp.count"
+    if [ "${actual:-0}" -ne "${expected:-0}" ]; then
+        rm -rf "$tmp"
+        fail "materialised ${actual:-0} of ${expected:-0} paths for $1." \
+             "Refusing rather than scanning a partial tree."
+    fi
+
+    if ! gitleaks dir "$tmp" --no-banner --redact --config "$CONFIG" \
+            >/dev/null 2>&1; then
+        echo "pre-push: gitleaks found secrets or personal paths in the tree" >&2
+        echo "          being pushed:" >&2
+        gitleaks dir "$tmp" --no-banner --redact --config "$CONFIG" 2>&1 \
+            | grep -vE '^[[:space:]]*$' | tail -25 >&2
+        rm -rf "$tmp"
+        exit 1
+    fi
+    rm -rf "$tmp"
+}
+
+
+scan_range() {
+    # Collapse whitespace: gitleaks splits --log-opts on spaces, so a doubled
+    # one becomes an empty revision and git aborts with "ambiguous argument".
+    set -- "$(printf '%s' "$1" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
+    count=$(git rev-list --count $1 2>/dev/null) || \
+        fail "could not resolve the commit range '$1'." \
+             "Refusing rather than pushing unscanned. Override with --no-verify."
+    [ "${count:-0}" -eq 0 ] && return 0
+
+    if [ ! -f "$CONFIG" ]; then
+        fail "$CONFIG is missing, so the custom rules would not apply." \
+             "gitleaks would silently fall back to its default ruleset, which" \
+             "does not look for home paths. Restore it, or --no-verify."
+    fi
+
+    if ! command -v gitleaks >/dev/null 2>&1; then
+        fail "gitleaks is not installed, so the push cannot be scanned." \
+             "Install it:  brew install gitleaks" \
+             "Refusing rather than passing unscanned. Override with --no-verify."
+    fi
+
+    # -m diffs a merge commit against each parent. Without it gitleaks skips a
+    # merge's own conflict resolution entirely, so a secret introduced while
+    # resolving a conflict was reported clean. Verified.
+    tmp_names=$(mktemp) || fail "could not create a temp file." "Refusing."
+    output=$(gitleaks git --no-banner --redact --config "$CONFIG" \
+                 --log-opts="$1 -m" 2>&1)
+    status=$?
+
+    # gitleaks exits 0 when its own git invocation fails, so a bad range would
+    # otherwise read as "clean". Treat scanning nothing we expected to scan as
+    # a failure, not a pass.
+    # Anchored so "10 commits scanned" is not read as "0 commits scanned".
+    #
+    # Only when there was something to scan: gitleaks skips commits with no
+    # file changes, so a range of empty commits legitimately reports zero and
+    # must not be refused.
+    # -m to match the scan below: without it a merge whose changes show only
+    # against one parent counts as touching nothing, and the guard would let a
+    # genuinely broken "0 commits scanned" through.
+    # `|| true` would mask a git log failure as well as grep's no-match status,
+    # leaving touched=0 and skipping the guard entirely. Check git separately.
+    if ! git log --format= --name-only -m $1 > "$tmp_names" 2>/dev/null; then
+        rm -f "$tmp_names"
+        fail "could not inspect the commit range '$1'." \
+             "Refusing rather than guessing whether there was anything to scan."
+    fi
+    touched=$(grep -c . "$tmp_names" || true)
+    rm -f "$tmp_names"
+    if [ "${touched:-0}" -gt 0 ] && echo "$output" | grep -qE '(^|[^0-9])0 commits scanned' ; then
+        fail "gitleaks scanned no commits for range '$1' (expected $count)." \
+             "$(echo "$output" | grep -i 'err' | head -3)" \
+             "Refusing rather than trusting an empty scan."
+    fi
+
+    if [ "$status" -ne 0 ]; then
+        echo "pre-push: gitleaks found secrets or personal paths in the commits" >&2
+        echo "          being pushed:" >&2
+        echo "$output" | grep -vE '^[[:space:]]*$' | tail -25 >&2
+        echo "" >&2
+        echo "          Use /Users/you in examples. Machine-specific values" >&2
+        echo "          belong in ~/.agent-tabs/config.json, outside the repo." >&2
+        exit 1
+    fi
+}
+
+# What the remote actually holds right now, as ^sha exclusions. Local
+# remote-tracking refs are not consulted: a branch deleted on the server still
+# looks published locally, which previously let a new ref scan zero commits and
+# ship a leak. Offline or on failure this yields nothing, so the scan widens to
+# full history rather than silently narrowing.
+remote_exclusions() {
+    # Bounded: an unreachable remote would otherwise hang every push, and a
+    # hook that hangs gets --no-verify'd into irrelevance.
+    #
+    # The status is checked explicitly rather than read off a pipeline, whose
+    # exit code belongs to the last stage: partial output from a failing
+    # ls-remote would otherwise become exclusions and narrow the scan. On any
+    # failure this yields nothing, widening the scan instead.
+    refs_file=$(mktemp) || return 0
+    ( git ls-remote "$REMOTE_TARGET" > "$refs_file" 2>/dev/null &
+      lsr=$!
+      ( sleep 10; kill "$lsr" 2>/dev/null ) 2>/dev/null &
+      watcher=$!
+      wait "$lsr" 2>/dev/null
+      status=$?
+      kill "$watcher" 2>/dev/null
+      exit "$status"
+    )
+    if [ $? -ne 0 ]; then
+        rm -f "$refs_file"
+        return 0
+    fi
+
+    awk '{print $1}' "$refs_file" | while read -r sha; do
+        # Peel: an annotated tag's sha is a tag object, not a commit.
+        commit=$(git rev-parse --quiet --verify "${sha}^{commit}" 2>/dev/null)
+        if [ -n "$commit" ]; then
+            printf '^%s\n' "$commit"
+        fi
+    done | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+    rm -f "$refs_file"
+}
+
+
+# `|| [ -n "$remote_ref" ]` handles a final line with no trailing newline. Git
+# always terminates it, but a guard that silently no-ops on malformed input
+# fails the wrong way.
+while read -r _local_ref local_sha remote_ref remote_sha || [ -n "$remote_ref" ]; do
+    [ -z "$remote_ref" ] && continue
+
+    if [ "$remote_ref" = "$PROTECTED" ]; then
+        fail "refusing to push directly to ${PROTECTED#refs/heads/}." \
+             "Open a PR:  git switch -c <type>/<topic> && gh pr create" \
+             "See AGENTS.md. Override with --no-verify if you mean it."
+    fi
+
+    # A deletion pushes no content, so there is nothing to scan.
+    [ "$local_sha" = "$ZERO" ] && continue
+
+    scan_tree "$local_sha"
+
+    if [ "$remote_sha" = "$ZERO" ]; then
+        # A new ref: scan what the server does not already have. Local
+        # remote-tracking refs go stale, so ask the remote what it actually
+        # holds rather than trusting them. Falling back to full history would
+        # otherwise reject every new branch over an old commit.
+        excl=$(remote_exclusions)
+        if [ -n "$excl" ]; then
+            scan_range "$local_sha $excl"
+        else
+            scan_range "$local_sha"
+        fi
+    else
+        scan_range "${remote_sha}..${local_sha}"
+    fi
+done
+
+exit 0
