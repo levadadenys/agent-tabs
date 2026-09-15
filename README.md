@@ -105,9 +105,27 @@ Without an entry, Codex is resumed with plain `codex`.
 - `~/.agent-tabs/history/` — last 60 captures
 - `~/.agent-tabs/recorder.log` — recorder errors
 
-A capture with zero agent sessions is archived to history but never promoted to
-`snapshot.json`, so a capture taken while iTerm is shutting down cannot
-overwrite a good snapshot with an empty one.
+Promotion to `snapshot.json` is guarded twice, because the moment a snapshot
+matters most is a reboot, and during shutdown tabs die one at a time:
+
+- a capture with no agent sessions is never promoted;
+- a capture that has collapsed relative to the last good one — keeping less
+  than `COLLAPSE_RATIO` of its sessions — is not promoted until it repeats
+  `COLLAPSE_STREAK` times. A shutdown is over long before that, so it cannot
+  overwrite a full snapshot; genuinely closing most of your sessions is
+  accepted about 90 seconds later.
+
+Closing a tab or two is an ordinary change and promotes immediately.
+
+## Rebooting
+
+Nothing to do. The recorder is a launchd agent, so it comes back at login and
+resumes capturing. Tick **Reopen windows when logging back in** at shutdown and
+iTerm restores the window and tab layout; then `agent-tabs restore --go` in each
+window refills them.
+
+If a snapshot ever does look wrong, `~/.agent-tabs/history/` keeps the last 60
+captures and both `list` and `restore` accept `-f <file>`.
 
 ## Limits
 

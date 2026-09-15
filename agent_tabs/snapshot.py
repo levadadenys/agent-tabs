@@ -15,6 +15,14 @@ LATEST = STATE_DIR / "snapshot.json"
 HISTORY_DIR = STATE_DIR / "history"
 HISTORY_KEEP = 60
 
+# A capture keeping at least this share of the last good count is an ordinary
+# change (you closed a tab); below it looks like a collapse.
+COLLAPSE_RATIO = 0.67
+# Consecutive collapsed captures before we believe it. At 30s each, a shutdown
+# is over long before this, so it cannot overwrite a good snapshot.
+COLLAPSE_STREAK = 3
+STREAK_FILE = STATE_DIR / "collapse-streak"
+
 # Both derive from adapters, which owns the definition of "is an agent".
 AGENT_KINDS = adapters.AGENT_KINDS
 AGENT_NAMES = adapters.AGENT_KINDS
@@ -91,6 +99,21 @@ def _harden(directory: Path) -> None:
         pass  # a permission problem here must never block a capture
 
 
+def _read_streak() -> int:
+    try:
+        return int(STREAK_FILE.read_text().strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_streak(value: int) -> None:
+    try:
+        STREAK_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        STREAK_FILE.write_text(str(value))
+    except OSError:
+        pass  # a streak we cannot record must never block a capture
+
+
 def _write_atomic(path: Path, snap: dict) -> None:
     _harden(path.parent)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
@@ -112,9 +135,15 @@ def _prune_history() -> None:
 def save(snap: dict) -> tuple[Path | None, Path]:
     """Persist a snapshot.
 
-    Always archived to history. Only promoted to `snapshot.json` when it holds
-    at least one agent session, so a capture taken while iTerm is shutting down
-    cannot overwrite a good snapshot with an empty one.
+    Always archived to history. Promotion to `snapshot.json` is guarded twice,
+    because the moment a snapshot matters most is a reboot -- and during
+    shutdown the tabs die one by one:
+
+    - a capture with no agent sessions is never promoted;
+    - a capture that has collapsed relative to the last good one is not
+      promoted until it repeats, so a half-dead shutdown state cannot overwrite
+      a full one. A genuine drop is accepted after COLLAPSE_STREAK captures; a
+      shutdown never lasts that long.
     """
     # Microseconds: two captures in the same second must not collide.
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
@@ -122,8 +151,24 @@ def save(snap: dict) -> tuple[Path | None, Path]:
     _write_atomic(archive, snap)
     _prune_history()
 
-    if agent_tab_count(snap) == 0:
+    count = agent_tab_count(snap)
+    if count == 0:
         return None, archive
+
+    previous = 0
+    if LATEST.exists():
+        try:
+            previous = agent_tab_count(json.loads(LATEST.read_text()))
+        except (json.JSONDecodeError, OSError):
+            previous = 0
+
+    if previous and count < previous * COLLAPSE_RATIO:
+        streak = _read_streak() + 1
+        if streak < COLLAPSE_STREAK:
+            _write_streak(streak)
+            return None, archive
+
+    _write_streak(0)
     _write_atomic(LATEST, snap)
     return LATEST, archive
 
