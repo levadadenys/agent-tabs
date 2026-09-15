@@ -203,11 +203,23 @@ def run(force: bool = False) -> int:
     agent_lines, loaded = _install_agent()
     lines += agent_lines
 
-    # Only once the replacement is actually running. Removing it after a failed
-    # bootstrap would leave no recorder at all.
-    if loaded and (LEGACY_AUTOLAUNCH.is_symlink() or LEGACY_AUTOLAUNCH.exists()):
-        LEGACY_AUTOLAUNCH.unlink()
-        lines.append(f"removed the old iTerm AutoLaunch recorder: {LEGACY_AUTOLAUNCH}")
+    # The legacy entry is only worth keeping if it could still run. It is
+    # normally a symlink to a script this version deletes, so after an upgrade
+    # it dangles and preserving it "as a fallback" would be theatre -- it would
+    # simply leave a broken entry in iTerm's AutoLaunch folder.
+    if LEGACY_AUTOLAUNCH.is_symlink() or LEGACY_AUTOLAUNCH.exists():
+        dangling = not LEGACY_AUTOLAUNCH.resolve().exists()
+        if loaded or dangling:
+            LEGACY_AUTOLAUNCH.unlink()
+            lines.append(
+                f"removed the old iTerm AutoLaunch recorder: {LEGACY_AUTOLAUNCH}"
+                + (" (it was already dangling)" if dangling and not loaded else "")
+            )
+        else:
+            lines.append(
+                f"kept the old AutoLaunch recorder at {LEGACY_AUTOLAUNCH}: "
+                "the replacement did not load and that one still resolves"
+            )
     if loaded:
         lines += _stop_legacy_processes()
 

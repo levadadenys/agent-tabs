@@ -71,13 +71,25 @@ def test_install_agent_reports_whether_it_loaded():
         assert loaded is True
 
 
-def test_a_failed_load_keeps_the_legacy_recorder():
-    # Removing the old one after a failed migration leaves nothing running.
+def test_a_failed_load_keeps_a_legacy_recorder_that_still_works():
+    # Removing a usable fallback after a failed migration leaves nothing.
     with Sandbox(1, "denied"):
         install.LEGACY_AUTOLAUNCH.parent.mkdir(parents=True, exist_ok=True)
         install.LEGACY_AUTOLAUNCH.write_text("legacy")
         install.run()
         assert install.LEGACY_AUTOLAUNCH.exists(), "legacy removed despite failure"
+
+
+def test_a_dangling_legacy_link_is_removed_even_on_failure():
+    # After an upgrade the link points at a script this version deletes, so
+    # keeping it "as a fallback" would just leave a broken AutoLaunch entry.
+    with Sandbox(1, "denied") as root:
+        install.LEGACY_AUTOLAUNCH.parent.mkdir(parents=True, exist_ok=True)
+        install.LEGACY_AUTOLAUNCH.symlink_to(root / "gone" / "recorder.py")
+        install.run()
+        assert not install.LEGACY_AUTOLAUNCH.is_symlink(), (
+            "a dangling legacy link was preserved as if it were a fallback"
+        )
 
 
 def test_a_successful_load_removes_the_legacy_recorder():
