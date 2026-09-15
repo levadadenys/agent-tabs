@@ -105,9 +105,50 @@ Without an entry, Codex is resumed with plain `codex`.
 - `~/.agent-tabs/history/` — last 60 captures
 - `~/.agent-tabs/recorder.log` — recorder errors
 
-A capture with zero agent sessions is archived to history but never promoted to
-`snapshot.json`, so a capture taken while iTerm is shutting down cannot
-overwrite a good snapshot with an empty one.
+Promotion to `snapshot.json` is guarded twice, because the moment a snapshot
+matters most is a reboot, and during shutdown tabs die one at a time:
+
+- a capture with no agent sessions is never promoted;
+- a capture that has collapsed relative to the last good one — keeping less
+  than `COLLAPSE_RATIO` of its sessions — is not promoted until the collapse
+  has persisted across `COLLAPSE_STREAK` captures **and** at least
+  `COLLAPSE_SETTLE_SECONDS` of wall-clock time. A shutdown is over long before
+  that, so it cannot overwrite a full snapshot; genuinely closing most of your
+  sessions is accepted about 90 seconds later.
+
+The run is derived from the history archives, which are append-only and
+uniquely named, rather than a separate counter file. That removes a second
+piece of mutable state that could be corrupted, raced by two overlapping
+captures, or wedged. The time requirement matters because several captures can
+land at once — a manual `agent-tabs snapshot` racing the launchd tick — and
+counting captures alone would clear the guard instantly.
+
+Closing a tab or two is an ordinary change and promotes immediately.
+
+## Rebooting
+
+Nothing to do. The recorder is a launchd agent, so it comes back at login and
+resumes capturing. Tick **Reopen windows when logging back in** at shutdown and
+iTerm restores the window and tab layout; then `agent-tabs restore --go` in each
+window refills them.
+
+If a snapshot ever does look wrong, `~/.agent-tabs/history/` keeps the last 60
+captures and both `list` and `restore` accept `-f <file>`.
+
+Two caveats worth knowing:
+
+- **A full reboot has never been tested end to end.** Every part is tested
+  individually — the guard, the restore planner, the launchd job surviving
+  login — but nobody has yet rebooted this machine and restored from the
+  snapshot that resulted. The first real reboot is the test. Run
+  `agent-tabs snapshot` beforehand if you want a belt-and-braces copy, and
+  check `agent-tabs list` afterwards before restoring.
+- **`COLLAPSE_RATIO` is coarse when you have few sessions.** With two tabs
+  open, closing one is a 50% drop and trips the collapse guard exactly as a
+  shutdown would, so the snapshot lags by up to `COLLAPSE_SETTLE_SECONDS`.
+  That is the safe direction — it never promotes the wrong thing — but at low
+  session counts "closed a tab" and "shutting down" are not distinguishable by
+  ratio alone.
 
 ## Limits
 

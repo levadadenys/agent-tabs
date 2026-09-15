@@ -15,6 +15,20 @@ LATEST = STATE_DIR / "snapshot.json"
 HISTORY_DIR = STATE_DIR / "history"
 HISTORY_KEEP = 60
 
+# A capture keeping at least this share of the last good count is an ordinary
+# change (you closed a tab); below it looks like a collapse.
+# Coarse at low session counts: with two tabs, closing one is a 50% drop and
+# reads as a collapse, delaying the snapshot by the settle window. Safe
+# direction, but the two cases are not distinguishable by ratio alone.
+COLLAPSE_RATIO = 0.67
+# Consecutive collapsed captures before we believe it. At 30s each, a shutdown
+# is over long before this, so it cannot overwrite a good snapshot.
+COLLAPSE_STREAK = 3
+# ...and spanning at least this long. Counting captures is not the same as the
+# collapse persisting: several captures can land at once (a manual snapshot
+# racing the launchd tick), which would satisfy a pure count instantly.
+COLLAPSE_SETTLE_SECONDS = 45
+
 # Both derive from adapters, which owns the definition of "is an agent".
 AGENT_KINDS = adapters.AGENT_KINDS
 AGENT_NAMES = adapters.AGENT_KINDS
@@ -91,6 +105,63 @@ def _harden(directory: Path) -> None:
         pass  # a permission problem here must never block a capture
 
 
+def _count_of(path: Path) -> int | None:
+    """Agent sessions in a stored snapshot, or None if it cannot be read."""
+    try:
+        return agent_tab_count(json.loads(path.read_text()))
+    except (json.JSONDecodeError, OSError, TypeError, AttributeError):
+        return None
+
+
+def _last_good_count(exclude: Path | None = None) -> int | None:
+    """Sessions in the snapshot a recovery would currently use.
+
+    Falls back to the newest readable archive if `snapshot.json` cannot be
+    parsed: treating an unreadable file as "no history" would switch the
+    collapse guard off exactly when the state is already suspect. The capture
+    being judged is excluded, or it would compare against itself.
+    """
+    if LATEST.exists():
+        count = _count_of(LATEST)
+        if count is not None:
+            return count
+    for archive in sorted(HISTORY_DIR.glob("*.json"), reverse=True):
+        if exclude is not None and archive == exclude:
+            continue
+        count = _count_of(archive)
+        if count is not None:
+            return count
+    return None
+
+
+def _archive_time(path: Path) -> datetime | None:
+    """Capture time from the archive filename, which save() always controls."""
+    try:
+        return datetime.strptime(path.stem, "%Y%m%dT%H%M%S%f").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return None
+
+
+def _recent_entries(limit: int) -> list[tuple[int, datetime]] | None:
+    """Counts from the newest `limit` archives, or None if any is unreadable.
+
+    History replaces a hand-kept streak counter: it is append-only, uniquely
+    named, and written before this decision, so there is no second piece of
+    mutable state to corrupt, race, or wedge.
+    """
+    archives = sorted(HISTORY_DIR.glob("*.json"), reverse=True)[:limit]
+    entries = []
+    for archive in archives:
+        count = _count_of(archive)
+        when = _archive_time(archive)
+        if count is None or when is None:
+            return None
+        entries.append((count, when))
+    return entries
+
+
 def _write_atomic(path: Path, snap: dict) -> None:
     _harden(path.parent)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
@@ -112,9 +183,15 @@ def _prune_history() -> None:
 def save(snap: dict) -> tuple[Path | None, Path]:
     """Persist a snapshot.
 
-    Always archived to history. Only promoted to `snapshot.json` when it holds
-    at least one agent session, so a capture taken while iTerm is shutting down
-    cannot overwrite a good snapshot with an empty one.
+    Always archived to history. Promotion to `snapshot.json` is guarded twice,
+    because the moment a snapshot matters most is a reboot -- and during
+    shutdown the tabs die one by one:
+
+    - a capture with no agent sessions is never promoted;
+    - a capture that has collapsed relative to the last good one is not
+      promoted until it repeats, so a half-dead shutdown state cannot overwrite
+      a full one. A genuine drop is accepted after COLLAPSE_STREAK captures; a
+      shutdown never lasts that long.
     """
     # Microseconds: two captures in the same second must not collide.
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
@@ -122,8 +199,25 @@ def save(snap: dict) -> tuple[Path | None, Path]:
     _write_atomic(archive, snap)
     _prune_history()
 
-    if agent_tab_count(snap) == 0:
+    count = agent_tab_count(snap)
+    if count == 0:
         return None, archive
+
+    previous = _last_good_count(exclude=archive)
+    if previous and count < previous * COLLAPSE_RATIO:
+        floor = previous * COLLAPSE_RATIO
+        recent = _recent_entries(COLLAPSE_STREAK)
+        # Promote only once the collapse has persisted, in both captures and
+        # wall-clock time. A zero capture or a recovery inside the window
+        # breaks the run by itself, so gaps and blips need no bookkeeping.
+        persistent = False
+        if recent is not None and len(recent) >= COLLAPSE_STREAK:
+            if all(0 < c < floor for c, _ in recent):
+                span = (recent[0][1] - recent[-1][1]).total_seconds()
+                persistent = span >= COLLAPSE_SETTLE_SECONDS
+        if not persistent:
+            return None, archive
+
     _write_atomic(LATEST, snap)
     return LATEST, archive
 
