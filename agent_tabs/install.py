@@ -120,14 +120,19 @@ def _install_agent() -> tuple[list[str], bool]:
 
 
 def run(force: bool = False) -> int:
+    # Link the main checkout, never a worktree: a worktree is deleted when its
+    # branch merges, and the symlink would dangle. Same reasoning as the plist.
+    root = main_checkout()
     lines = [
-        _link(REPO / "bin" / "agent-tabs", BIN_DIR / "agent-tabs", force),
-        _link(SKILL_SRC, SKILL_DST, force),
+        _link(root / "bin" / "agent-tabs", BIN_DIR / "agent-tabs", force),
+        _link(root / "skills" / "resume-tabs", SKILL_DST, force),
     ]
     agent_lines, loaded = _install_agent()
     lines += agent_lines
 
-    if LEGACY_AUTOLAUNCH.is_symlink() or LEGACY_AUTOLAUNCH.exists():
+    # Only once the replacement is actually running. Removing it after a failed
+    # bootstrap would leave no recorder at all.
+    if loaded and (LEGACY_AUTOLAUNCH.is_symlink() or LEGACY_AUTOLAUNCH.exists()):
         LEGACY_AUTOLAUNCH.unlink()
         lines.append(f"removed the old iTerm AutoLaunch recorder: {LEGACY_AUTOLAUNCH}")
 

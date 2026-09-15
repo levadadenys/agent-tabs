@@ -7,6 +7,7 @@ not read a dead recorder as success.
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -15,44 +16,85 @@ from agent_tabs import install  # noqa: E402
 from runner import run  # noqa: E402
 
 
-def with_launchctl(returncode: int, err: str = ""):
-    original = install._launchctl
-    install._launchctl = lambda *a: subprocess.CompletedProcess(  # type: ignore[assignment]
-        a, returncode, "", err
-    )
-    return original
+class Sandbox:
+    """Point every path the installer writes at a temp dir.
+
+    Without this the suite writes the real ~/Library/LaunchAgents plist and the
+    real CLI/skill symlinks -- running the tests would mutate a live install.
+    """
+
+    ATTRS = ("AGENT_DIR", "AGENT_PLIST", "BIN_DIR", "SKILL_DST", "LOG",
+             "LEGACY_AUTOLAUNCH")
+
+    def __init__(self, returncode: int, err: str = ""):
+        self.returncode, self.err = returncode, err
+
+    def __enter__(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self._saved = {a: getattr(install, a) for a in self.ATTRS}
+        self._saved["_launchctl"] = install._launchctl
+        install.AGENT_DIR = root / "LaunchAgents"
+        install.AGENT_PLIST = install.AGENT_DIR / "test.plist"
+        install.BIN_DIR = root / "bin"
+        install.SKILL_DST = root / "skills" / "resume-tabs"
+        install.LOG = root / "state" / "recorder.log"
+        install.LEGACY_AUTOLAUNCH = root / "legacy" / "agent_tabs_recorder.py"
+        install._launchctl = lambda *a: subprocess.CompletedProcess(
+            a, self.returncode, "", self.err
+        )
+        return root
+
+    def __exit__(self, *exc):
+        for name, value in self._saved.items():
+            setattr(install, name, value)
+        self._tmp.cleanup()
+        return False
 
 
 def test_failed_load_exits_non_zero():
-    original = with_launchctl(1, "permission denied")
-    try:
+    with Sandbox(1, "permission denied"):
         assert install.run() == 1, "a dead recorder must not report success"
-    finally:
-        install._launchctl = original  # type: ignore[assignment]
 
 
 def test_successful_load_exits_zero():
-    original = with_launchctl(0)
-    try:
+    with Sandbox(0):
         assert install.run() == 0
-    finally:
-        install._launchctl = original  # type: ignore[assignment]
 
 
 def test_install_agent_reports_whether_it_loaded():
-    original = with_launchctl(1, "nope")
-    try:
+    with Sandbox(1, "nope"):
         _, loaded = install._install_agent()
         assert loaded is False
-    finally:
-        install._launchctl = original  # type: ignore[assignment]
-
-    original = with_launchctl(0)
-    try:
+    with Sandbox(0):
         _, loaded = install._install_agent()
         assert loaded is True
-    finally:
-        install._launchctl = original  # type: ignore[assignment]
+
+
+def test_a_failed_load_keeps_the_legacy_recorder():
+    # Removing the old one after a failed migration leaves nothing running.
+    with Sandbox(1, "denied"):
+        install.LEGACY_AUTOLAUNCH.parent.mkdir(parents=True, exist_ok=True)
+        install.LEGACY_AUTOLAUNCH.write_text("legacy")
+        install.run()
+        assert install.LEGACY_AUTOLAUNCH.exists(), "legacy removed despite failure"
+
+
+def test_a_successful_load_removes_the_legacy_recorder():
+    with Sandbox(0):
+        install.LEGACY_AUTOLAUNCH.parent.mkdir(parents=True, exist_ok=True)
+        install.LEGACY_AUTOLAUNCH.write_text("legacy")
+        install.run()
+        assert not install.LEGACY_AUTOLAUNCH.exists()
+
+
+def test_the_suite_does_not_touch_the_real_install():
+    real_plist = Path.home() / "Library" / "LaunchAgents" / "com.agent-tabs.recorder.plist"
+    before = real_plist.stat().st_mtime if real_plist.exists() else None
+    with Sandbox(0):
+        install.run()
+    after = real_plist.stat().st_mtime if real_plist.exists() else None
+    assert before == after, "the tests wrote the real launchd plist"
 
 
 if __name__ == "__main__":
