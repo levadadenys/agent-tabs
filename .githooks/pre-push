@@ -34,31 +34,37 @@ fail() {
 # scanning has blind spots (merge handling, empty commits); the final tree is
 # the ground truth for what lands on the remote.
 scan_tree() {
+    # Materialise the tree from git objects directly. `git archive` honours
+    # export-ignore in .gitattributes and would silently omit tracked files
+    # that the push still sends, so the "ground truth" scan would have a hole.
+    # Reading ls-tree/cat-file has no such filter, and needs no intermediate
+    # tarball that a tracked file could collide with.
     tmp=$(mktemp -d) || fail "could not create a temp dir to scan the pushed tree." \
                              "Refusing rather than skipping the scan."
-    # Separate steps, not a pipeline: /bin/sh has no pipefail, so `git archive |
-    # tar` reports tar's status and a failed archive would read as success.
-    if ! git archive --format=tar -o "$tmp/tree.tar" "$1" 2>/dev/null; then
-        rm -rf "$tmp"
-        fail "could not archive $1 for scanning." \
-             "Refusing rather than skipping the scan."
+
+    if ! git ls-tree -r -z --name-only "$1" 2>/dev/null > "$tmp.paths"; then
+        rm -rf "$tmp" "$tmp.paths"
+        fail "could not list the tree for $1." "Refusing rather than skipping the scan."
     fi
-    if ! tar -x -f "$tmp/tree.tar" -C "$tmp" 2>/dev/null; then
-        rm -rf "$tmp"
-        fail "could not extract the tree for $1." \
-             "Refusing rather than skipping the scan."
-    fi
-    rm -f "$tmp/tree.tar"
-    if true; then
-        if ! gitleaks dir "$tmp" --no-banner --redact --config "$CONFIG" \
-                >/dev/null 2>&1; then
-            echo "pre-push: gitleaks found secrets or personal paths in the tree" >&2
-            echo "          being pushed:" >&2
-            gitleaks dir "$tmp" --no-banner --redact --config "$CONFIG" 2>&1 \
-                | grep -vE '^[[:space:]]*$' | tail -25 >&2
-            rm -rf "$tmp"
-            exit 1
+
+    while IFS= read -r -d '' path; do
+        [ -z "$path" ] && continue
+        mkdir -p "$tmp/$(dirname "$path")" 2>/dev/null || continue
+        if ! git cat-file blob "$1:$path" > "$tmp/$path" 2>/dev/null; then
+            rm -rf "$tmp" "$tmp.paths"
+            fail "could not read $path from $1." "Refusing rather than skipping the scan."
         fi
+    done < "$tmp.paths"
+    rm -f "$tmp.paths"
+
+    if ! gitleaks dir "$tmp" --no-banner --redact --config "$CONFIG" \
+            >/dev/null 2>&1; then
+        echo "pre-push: gitleaks found secrets or personal paths in the tree" >&2
+        echo "          being pushed:" >&2
+        gitleaks dir "$tmp" --no-banner --redact --config "$CONFIG" 2>&1 \
+            | grep -vE '^[[:space:]]*$' | tail -25 >&2
+        rm -rf "$tmp"
+        exit 1
     fi
     rm -rf "$tmp"
 }
@@ -96,7 +102,12 @@ scan_range() {
     # otherwise read as "clean". Treat scanning nothing we expected to scan as
     # a failure, not a pass.
     # Anchored so "10 commits scanned" is not read as "0 commits scanned".
-    if echo "$output" | grep -qE '(^|[^0-9])0 commits scanned' ; then
+    #
+    # Only when there was something to scan: gitleaks skips commits with no
+    # file changes, so a range of empty commits legitimately reports zero and
+    # must not be refused.
+    touched=$(git log --format= --name-only $1 2>/dev/null | grep -c . || true)
+    if [ "${touched:-0}" -gt 0 ] && echo "$output" | grep -qE '(^|[^0-9])0 commits scanned' ; then
         fail "gitleaks scanned no commits for range '$1' (expected $count)." \
              "$(echo "$output" | grep -i 'err' | head -3)" \
              "Refusing rather than trusting an empty scan."
