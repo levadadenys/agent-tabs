@@ -76,7 +76,11 @@ while read -r _local_ref local_sha remote_ref remote_sha || [ -n "$remote_ref" ]
     [ "$local_sha" = "$ZERO" ] && continue
 
     if [ "$remote_sha" = "$ZERO" ]; then
-        scan_range "$local_sha --not --remotes"
+        # A new ref: scan everything it reaches. Excluding --remotes would be
+        # cheaper, but local remote-tracking refs go stale -- a branch deleted
+        # on the server still counts as "published" locally, so a push that
+        # reintroduces its commits scans zero and ships the leak. Verified.
+        scan_range "$local_sha"
     else
         scan_range "${remote_sha}..${local_sha}"
     fi
