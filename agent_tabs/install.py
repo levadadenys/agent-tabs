@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import plistlib
 import subprocess
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -12,7 +14,6 @@ SKILL_SRC = REPO / "skills" / "resume-tabs"
 SKILL_DST = Path.home() / ".claude" / "skills" / "resume-tabs"
 
 LABEL = "com.agent-tabs.recorder"
-TEMPLATE = REPO / "launchd" / f"{LABEL}.plist.template"
 AGENT_DIR = Path.home() / "Library" / "LaunchAgents"
 AGENT_PLIST = AGENT_DIR / f"{LABEL}.plist"
 LOG = Path.home() / ".agent-tabs" / "recorder.log"
@@ -74,15 +75,25 @@ def _install_agent() -> list[str]:
     cli = main_checkout() / "bin" / "agent-tabs"
     LOG.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
-    plist = (
-        TEMPLATE.read_text()
-        .replace("@@LABEL@@", LABEL)
-        .replace("@@CLI@@", str(cli))
-        .replace("@@INTERVAL@@", str(INTERVAL_SECONDS))
-        .replace("@@LOG@@", str(LOG))
-    )
+    # Built with plistlib rather than string substitution: a path containing
+    # &, < or > would otherwise produce malformed XML and a plist launchd
+    # refuses to load.
+    #
+    # The interpreter is the absolute one running this installer. launchd gives
+    # a job a minimal PATH, so a `#!/usr/bin/env python3` shebang could resolve
+    # to a different python than the one installing, or to none at all.
+    job = {
+        "Label": LABEL,
+        "ProgramArguments": [sys.executable, str(cli), "snapshot", "--quiet"],
+        "StartInterval": INTERVAL_SECONDS,
+        "RunAtLoad": True,
+        # A capture taken while iTerm is closed finds nothing and is not
+        # promoted, so routine failures here are expected and must not spam.
+        "StandardErrorPath": str(LOG),
+    }
     AGENT_DIR.mkdir(parents=True, exist_ok=True)
-    AGENT_PLIST.write_text(plist)
+    with AGENT_PLIST.open("wb") as handle:
+        plistlib.dump(job, handle)
     lines.append(f"wrote {AGENT_PLIST}")
 
     domain = f"gui/{os.getuid()}"
