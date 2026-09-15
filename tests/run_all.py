@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run every test module and report a single verdict."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,8 +12,17 @@ HERE = Path(__file__).resolve().parent
 def main() -> int:
     failures, total = [], 0
     for path in sorted(HERE.glob("test_*.py")):
+        # -B disables bytecode caching. Mutation testing edits a file, runs the
+        # tests, then restores it; when the edit is the same byte length and
+        # lands in the same second, Python's mtime+size cache check passes and
+        # it silently runs the STALE mutant. Observed: source read
+        # ENUMERATE_ATTEMPTS = 3 while Python had loaded 1.
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         result = subprocess.run(
-            [sys.executable, str(path)], capture_output=True, text=True
+            [sys.executable, "-B", str(path)],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         passed = result.stdout.count("PASS ")
         failed = result.stdout.count("FAIL ")
