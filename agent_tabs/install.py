@@ -113,13 +113,20 @@ def main_checkout() -> Path:
             capture_output=True, text=True, check=False,
         )
     except OSError:
-        # No git available (a zip download, a stripped PATH). The repo path we
-        # were imported from is the best answer, and is correct unless this is
-        # a worktree.
+        result = None
+
+    if result is None or result.returncode != 0 or not result.stdout.strip():
+        # A worktree's .git is a FILE pointing at the real repo. Without git we
+        # cannot resolve it, and returning REPO would bake in a path that
+        # disappears with the worktree -- the very bug this resolver exists to
+        # prevent. A plain checkout or zip download has no such ambiguity.
+        if (REPO / ".git").is_file():
+            raise RuntimeError(
+                f"{REPO} looks like a git worktree but git is unavailable, so the "
+                "main checkout cannot be resolved. Install from the main checkout."
+            )
         return REPO
-    if result.returncode == 0 and result.stdout.strip():
-        return Path(result.stdout.strip()).parent
-    return REPO
+    return Path(result.stdout.strip()).parent
 
 
 def _launchctl(*args: str) -> subprocess.CompletedProcess:
@@ -151,17 +158,31 @@ def _install_agent() -> tuple[list[str], bool]:
         "StandardErrorPath": str(LOG),
     }
     AGENT_DIR.mkdir(parents=True, exist_ok=True)
+    previous = AGENT_PLIST.read_bytes() if AGENT_PLIST.exists() else None
     with AGENT_PLIST.open("wb") as handle:
         plistlib.dump(job, handle)
     lines.append(f"wrote {AGENT_PLIST}")
 
     domain = f"gui/{os.getuid()}"
-    # Replace any previous copy, so re-running install picks up a new path.
-    _launchctl("bootout", f"{domain}/{LABEL}")
+    # Try to load without booting out first: tearing down a healthy job and
+    # then failing to replace it would leave no recorder at all, which is worse
+    # than not upgrading. Only replace once the new plist is known good.
     result = _launchctl("bootstrap", domain, str(AGENT_PLIST))
     if result.returncode != 0:
-        # Older macOS, or a domain that refuses bootstrap.
-        result = _launchctl("load", "-w", str(AGENT_PLIST))
+        # Most likely already loaded; replace it, then fall back to load -w.
+        _launchctl("bootout", f"{domain}/{LABEL}")
+        result = _launchctl("bootstrap", domain, str(AGENT_PLIST))
+        if result.returncode != 0:
+            result = _launchctl("load", "-w", str(AGENT_PLIST))
+        if result.returncode != 0 and previous is not None:
+            # Put the working job back rather than leaving nothing running.
+            AGENT_PLIST.write_bytes(previous)
+            restore = _launchctl("bootstrap", domain, str(AGENT_PLIST))
+            lines.append(
+                "restored the previous recorder"
+                if restore.returncode == 0
+                else "could not restore the previous recorder"
+            )
     if result.returncode == 0:
         lines.append(f"recorder loaded, every {INTERVAL_SECONDS}s")
         return lines, True

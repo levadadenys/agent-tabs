@@ -144,6 +144,41 @@ def test_a_failed_load_leaves_the_legacy_recorder_alone():
         assert script.exists(), "legacy removed despite a failed load"
 
 
+def test_a_failed_reinstall_restores_the_previous_job():
+    # Tearing down a healthy recorder and then failing to replace it is worse
+    # than not upgrading at all.
+    with Sandbox(1, "bootstrap refused") as root:
+        install.AGENT_DIR.mkdir(parents=True, exist_ok=True)
+        install.AGENT_PLIST.write_bytes(b"PREVIOUS")
+        install.run()
+        assert install.AGENT_PLIST.read_bytes() == b"PREVIOUS", (
+            "a failed reinstall left the new plist in place of a working one"
+        )
+
+
+def test_worktree_without_git_refuses_rather_than_baking_a_doomed_path():
+    import subprocess as sp
+    original = install.REPO
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "wt"
+            fake.mkdir()
+            (fake / ".git").write_text("gitdir: /elsewhere/.git/worktrees/wt")
+            install.REPO = fake
+            saved_run = sp.run
+            sp.run = lambda *a, **k: (_ for _ in ()).throw(OSError("no git"))
+            try:
+                install.main_checkout()
+            except RuntimeError as exc:
+                assert "worktree" in str(exc)
+            else:
+                raise AssertionError("should refuse a worktree it cannot resolve")
+            finally:
+                sp.run = saved_run
+    finally:
+        install.REPO = original
+
+
 def test_the_suite_does_not_touch_the_real_install():
     real_plist = Path.home() / "Library" / "LaunchAgents" / "com.agent-tabs.recorder.plist"
     before = real_plist.stat().st_mtime if real_plist.exists() else None
