@@ -88,6 +88,43 @@ def test_a_successful_load_removes_the_legacy_recorder():
         assert not install.LEGACY_AUTOLAUNCH.exists()
 
 
+def test_a_running_legacy_recorder_is_stopped():
+    # Unlinking the script does not stop a process iTerm already started; both
+    # would then capture every 30s and race on snapshot.json.
+    import os, subprocess, time
+    with Sandbox(0):
+        script = install.LEGACY_AUTOLAUNCH
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("import time\ntime.sleep(60)\n")
+        proc = subprocess.Popen([sys.executable, str(script)])
+        for _ in range(50):
+            listing = subprocess.run(["ps", "-Ao", "pid=,command="],
+                                     capture_output=True, text=True).stdout
+            if any(script.name in l and str(proc.pid) in l for l in listing.splitlines()):
+                break
+            time.sleep(0.1)
+        try:
+            install.run()
+            for _ in range(50):
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.1)
+            assert proc.poll() is not None, "legacy recorder still running"
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
+
+
+def test_a_failed_load_leaves_the_legacy_recorder_alone():
+    with Sandbox(1, "denied"):
+        script = install.LEGACY_AUTOLAUNCH
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("x")
+        install.run()
+        assert script.exists(), "legacy removed despite a failed load"
+
+
 def test_the_suite_does_not_touch_the_real_install():
     real_plist = Path.home() / "Library" / "LaunchAgents" / "com.agent-tabs.recorder.plist"
     before = real_plist.stat().st_mtime if real_plist.exists() else None

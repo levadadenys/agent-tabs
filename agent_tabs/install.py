@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import plistlib
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +32,39 @@ LEGACY_AUTOLAUNCH = (
     / "AutoLaunch"
     / "agent_tabs_recorder.py"
 )
+
+
+def _stop_legacy_processes() -> list[str]:
+    """Kill an AutoLaunch recorder iTerm already started.
+
+    Unlinking the script does not stop a running instance -- its loop lives
+    until iTerm exits. Left alone it would keep capturing every 30s alongside
+    the launchd job, and the two would race on snapshot.json.
+    """
+    try:
+        listing = subprocess.run(
+            ["ps", "-Ao", "pid=,command="], capture_output=True, text=True, check=False
+        ).stdout
+    except OSError:
+        return []
+
+    stopped = []
+    for line in listing.splitlines():
+        if LEGACY_AUTOLAUNCH.name not in line:
+            continue
+        pid_text = line.split(None, 1)[0]
+        try:
+            pid = int(pid_text)
+        except ValueError:
+            continue
+        if pid == os.getpid():
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+            stopped.append(f"stopped the old recorder still running as pid {pid}")
+        except OSError as exc:
+            stopped.append(f"could not stop the old recorder (pid {pid}): {exc}")
+    return stopped
 
 
 def _link(src: Path, dst: Path, force: bool) -> str:
@@ -135,6 +169,8 @@ def run(force: bool = False) -> int:
     if loaded and (LEGACY_AUTOLAUNCH.is_symlink() or LEGACY_AUTOLAUNCH.exists()):
         LEGACY_AUTOLAUNCH.unlink()
         lines.append(f"removed the old iTerm AutoLaunch recorder: {LEGACY_AUTOLAUNCH}")
+    if loaded:
+        lines += _stop_legacy_processes()
 
     for line in lines:
         print(line)
