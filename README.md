@@ -135,6 +135,21 @@ window refills them.
 If a snapshot ever does look wrong, `~/.agent-tabs/history/` keeps the last 60
 captures and both `list` and `restore` accept `-f <file>`.
 
+Two caveats worth knowing:
+
+- **A full reboot has never been tested end to end.** Every part is tested
+  individually — the guard, the restore planner, the launchd job surviving
+  login — but nobody has yet rebooted this machine and restored from the
+  snapshot that resulted. The first real reboot is the test. Run
+  `agent-tabs snapshot` beforehand if you want a belt-and-braces copy, and
+  check `agent-tabs list` afterwards before restoring.
+- **`COLLAPSE_RATIO` is coarse when you have few sessions.** With two tabs
+  open, closing one is a 50% drop and trips the collapse guard exactly as a
+  shutdown would, so the snapshot lags by up to `COLLAPSE_SETTLE_SECONDS`.
+  That is the safe direction — it never promotes the wrong thing — but at low
+  session counts "closed a tab" and "shutting down" are not distinguishable by
+  ratio alone.
+
 ## Limits
 
 - iTerm2 only, macOS only.

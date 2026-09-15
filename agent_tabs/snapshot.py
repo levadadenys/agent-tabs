@@ -17,6 +17,9 @@ HISTORY_KEEP = 60
 
 # A capture keeping at least this share of the last good count is an ordinary
 # change (you closed a tab); below it looks like a collapse.
+# Coarse at low session counts: with two tabs, closing one is a 50% drop and
+# reads as a collapse, delaying the snapshot by the settle window. Safe
+# direction, but the two cases are not distinguishable by ratio alone.
 COLLAPSE_RATIO = 0.67
 # Consecutive collapsed captures before we believe it. At 30s each, a shutdown
 # is over long before this, so it cannot overwrite a good snapshot.
