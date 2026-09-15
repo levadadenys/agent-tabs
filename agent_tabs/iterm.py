@@ -8,6 +8,7 @@ on iTerm's bundled Python environment.
 from __future__ import annotations
 
 import subprocess
+import time
 
 # ASCII unit separator: a terminal strips control characters from titles, so
 # unlike a printable delimiter this cannot collide with tab content and
@@ -67,8 +68,30 @@ def is_running() -> bool:
         return False
 
 
+ENUMERATE_ATTEMPTS = 3
+ENUMERATE_BACKOFF_SECONDS = 0.4
+
+
 def enumerate_tabs() -> list[dict]:
-    """Every split-pane session in every window, with its tty and title."""
+    """Every split-pane session in every window, with its tty and title.
+
+    Retries a few times: closing a tab while AppleScript is walking the window
+    list raises "Invalid index (-1719)" and loses the whole capture. Observed in
+    practice, not theoretical. A lost capture is cheap on any single tick and
+    expensive if it is the last one before a crash.
+    """
+    last: ITermError | None = None
+    for attempt in range(ENUMERATE_ATTEMPTS):
+        try:
+            return _enumerate_once()
+        except ITermError as exc:
+            last = exc
+            if attempt < ENUMERATE_ATTEMPTS - 1:
+                time.sleep(ENUMERATE_BACKOFF_SECONDS)
+    raise last if last else ITermError("enumeration failed")
+
+
+def _enumerate_once() -> list[dict]:
     rows = []
     for line in _osascript(ENUMERATE).splitlines():
         if not line.strip():
