@@ -17,6 +17,14 @@ regex = '''/Users/[A-Za-z0-9._-]+'''
   # Both are documented placeholders. /Users/me appears in earlier history and
   # is not a real path; allowlisting it keeps old commits from tripping a scan
   # of a new branch forever.
+  #
+  # Because the rule matches only the /Users/<name> prefix, allowlisting these
+  # also exempts their subtrees -- /Users/you/credentials.txt is suppressed.
+  # That is deliberate, not an oversight: the examples this allowlist exists
+  # for are subtree paths (/Users/you/.codex-work in config.example.json), and
+  # nothing distinguishes an example from a leak under the same prefix. The
+  # residual risk is an account literally named "me" or "you". A real username
+  # is still caught -- verified.
   regexes = ['''^/Users/you$''', '''^/Users/me$''']
 
 [[rules]]

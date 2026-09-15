@@ -12,7 +12,10 @@
 #     git push --no-verify
 #
 PROTECTED="refs/heads/main"
+# $1 is the remote name, $2 the destination URL. Prefer the URL: a remote
+# with a separate pushurl would otherwise be queried at the wrong repo.
 REMOTE_NAME="${1:-origin}"
+REMOTE_TARGET="${2:-$REMOTE_NAME}"
 ROOT=$(git rev-parse --show-toplevel)
 CONFIG="$ROOT/.gitleaks.toml"
 ZERO="0000000000000000000000000000000000000000"
@@ -31,8 +34,22 @@ fail() {
 # scanning has blind spots (merge handling, empty commits); the final tree is
 # the ground truth for what lands on the remote.
 scan_tree() {
-    tmp=$(mktemp -d) || return 0
-    if git archive --format=tar "$1" 2>/dev/null | tar -x -C "$tmp" 2>/dev/null; then
+    tmp=$(mktemp -d) || fail "could not create a temp dir to scan the pushed tree." \
+                             "Refusing rather than skipping the scan."
+    # Separate steps, not a pipeline: /bin/sh has no pipefail, so `git archive |
+    # tar` reports tar's status and a failed archive would read as success.
+    if ! git archive --format=tar -o "$tmp/tree.tar" "$1" 2>/dev/null; then
+        rm -rf "$tmp"
+        fail "could not archive $1 for scanning." \
+             "Refusing rather than skipping the scan."
+    fi
+    if ! tar -x -f "$tmp/tree.tar" -C "$tmp" 2>/dev/null; then
+        rm -rf "$tmp"
+        fail "could not extract the tree for $1." \
+             "Refusing rather than skipping the scan."
+    fi
+    rm -f "$tmp/tree.tar"
+    if true; then
         if ! gitleaks dir "$tmp" --no-banner --redact --config "$CONFIG" \
                 >/dev/null 2>&1; then
             echo "pre-push: gitleaks found secrets or personal paths in the tree" >&2
@@ -105,7 +122,9 @@ remote_exclusions() {
     # Bounded: an unreachable remote would otherwise hang every push, and a
     # hook that hangs gets --no-verify'd into irrelevance. On timeout this
     # yields nothing, which widens the scan rather than narrowing it.
-    ( git ls-remote --heads "$REMOTE_NAME" 2>/dev/null &
+    # All advertised refs, not just heads: a commit kept reachable only by a tag
+    # is already published, and excluding it avoids rescanning old history.
+    ( git ls-remote "$REMOTE_TARGET" 2>/dev/null &
       lsr=$!
       ( sleep 10; kill "$lsr" 2>/dev/null ) 2>/dev/null &
       watcher=$!
@@ -113,8 +132,10 @@ remote_exclusions() {
       kill "$watcher" 2>/dev/null
     ) | awk '{print $1}' | \
     while read -r sha; do
-        if git cat-file -e "${sha}^{commit}" 2>/dev/null; then
-            printf '^%s\n' "$sha"
+        # Peel: an annotated tag's sha is a tag object, not a commit.
+        commit=$(git rev-parse --quiet --verify "${sha}^{commit}" 2>/dev/null)
+        if [ -n "$commit" ]; then
+            printf '^%s\n' "$commit"
         fi
     done | tr '\n' ' ' | sed 's/[[:space:]]*$//'
 }
