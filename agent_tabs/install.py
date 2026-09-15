@@ -170,6 +170,15 @@ def _install_agent() -> tuple[list[str], bool]:
     result = _launchctl("bootstrap", domain, str(AGENT_PLIST))
     if result.returncode != 0:
         # Most likely already loaded; replace it, then fall back to load -w.
+        # Only tear down when we can put something back: if there was no prior
+        # plist to restore, an existing healthy job is the only recorder there
+        # is, and losing it is worse than not upgrading.
+        if previous is None and _launchctl("print", f"{domain}/{LABEL}").returncode == 0:
+            lines.append(
+                "a recorder is already loaded and no previous definition was "
+                "saved, so it was left alone rather than risk removing it"
+            )
+            return lines, True
         _launchctl("bootout", f"{domain}/{LABEL}")
         result = _launchctl("bootstrap", domain, str(AGENT_PLIST))
         if result.returncode != 0:
