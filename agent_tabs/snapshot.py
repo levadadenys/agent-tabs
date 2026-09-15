@@ -21,7 +21,10 @@ COLLAPSE_RATIO = 0.67
 # Consecutive collapsed captures before we believe it. At 30s each, a shutdown
 # is over long before this, so it cannot overwrite a good snapshot.
 COLLAPSE_STREAK = 3
-STREAK_FILE = STATE_DIR / "collapse-streak"
+# ...and spanning at least this long. Counting captures is not the same as the
+# collapse persisting: several captures can land at once (a manual snapshot
+# racing the launchd tick), which would satisfy a pure count instantly.
+COLLAPSE_SETTLE_SECONDS = 45
 
 # Both derive from adapters, which owns the definition of "is an agent".
 AGENT_KINDS = adapters.AGENT_KINDS
@@ -99,19 +102,61 @@ def _harden(directory: Path) -> None:
         pass  # a permission problem here must never block a capture
 
 
-def _read_streak() -> int:
+def _count_of(path: Path) -> int | None:
+    """Agent sessions in a stored snapshot, or None if it cannot be read."""
     try:
-        return int(STREAK_FILE.read_text().strip())
-    except (OSError, ValueError):
-        return 0
+        return agent_tab_count(json.loads(path.read_text()))
+    except (json.JSONDecodeError, OSError, TypeError, AttributeError):
+        return None
 
 
-def _write_streak(value: int) -> None:
+def _last_good_count(exclude: Path | None = None) -> int | None:
+    """Sessions in the snapshot a recovery would currently use.
+
+    Falls back to the newest readable archive if `snapshot.json` cannot be
+    parsed: treating an unreadable file as "no history" would switch the
+    collapse guard off exactly when the state is already suspect. The capture
+    being judged is excluded, or it would compare against itself.
+    """
+    if LATEST.exists():
+        count = _count_of(LATEST)
+        if count is not None:
+            return count
+    for archive in sorted(HISTORY_DIR.glob("*.json"), reverse=True):
+        if exclude is not None and archive == exclude:
+            continue
+        count = _count_of(archive)
+        if count is not None:
+            return count
+    return None
+
+
+def _archive_time(path: Path) -> datetime | None:
+    """Capture time from the archive filename, which save() always controls."""
     try:
-        STREAK_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        STREAK_FILE.write_text(str(value))
-    except OSError:
-        pass  # a streak we cannot record must never block a capture
+        return datetime.strptime(path.stem, "%Y%m%dT%H%M%S%f").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return None
+
+
+def _recent_entries(limit: int) -> list[tuple[int, datetime]] | None:
+    """Counts from the newest `limit` archives, or None if any is unreadable.
+
+    History replaces a hand-kept streak counter: it is append-only, uniquely
+    named, and written before this decision, so there is no second piece of
+    mutable state to corrupt, race, or wedge.
+    """
+    archives = sorted(HISTORY_DIR.glob("*.json"), reverse=True)[:limit]
+    entries = []
+    for archive in archives:
+        count = _count_of(archive)
+        when = _archive_time(archive)
+        if count is None or when is None:
+            return None
+        entries.append((count, when))
+    return entries
 
 
 def _write_atomic(path: Path, snap: dict) -> None:
@@ -153,27 +198,23 @@ def save(snap: dict) -> tuple[Path | None, Path]:
 
     count = agent_tab_count(snap)
     if count == 0:
-        # Restart the streak: collapses either side of a gap are not
-        # consecutive. Without this, a shutdown's collapses carry across the
-        # zero captures while iTerm is closed, and the first partial capture
-        # after a reboot is promoted over the full snapshot.
-        _write_streak(0)
         return None, archive
 
-    previous = 0
-    if LATEST.exists():
-        try:
-            previous = agent_tab_count(json.loads(LATEST.read_text()))
-        except (json.JSONDecodeError, OSError):
-            previous = 0
-
+    previous = _last_good_count(exclude=archive)
     if previous and count < previous * COLLAPSE_RATIO:
-        streak = _read_streak() + 1
-        if streak < COLLAPSE_STREAK:
-            _write_streak(streak)
+        floor = previous * COLLAPSE_RATIO
+        recent = _recent_entries(COLLAPSE_STREAK)
+        # Promote only once the collapse has persisted, in both captures and
+        # wall-clock time. A zero capture or a recovery inside the window
+        # breaks the run by itself, so gaps and blips need no bookkeeping.
+        persistent = False
+        if recent is not None and len(recent) >= COLLAPSE_STREAK:
+            if all(0 < c < floor for c, _ in recent):
+                span = (recent[0][1] - recent[-1][1]).total_seconds()
+                persistent = span >= COLLAPSE_SETTLE_SECONDS
+        if not persistent:
             return None, archive
 
-    _write_streak(0)
     _write_atomic(LATEST, snap)
     return LATEST, archive
 

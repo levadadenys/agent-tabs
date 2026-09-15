@@ -110,10 +110,18 @@ matters most is a reboot, and during shutdown tabs die one at a time:
 
 - a capture with no agent sessions is never promoted;
 - a capture that has collapsed relative to the last good one — keeping less
-  than `COLLAPSE_RATIO` of its sessions — is not promoted until it repeats
-  `COLLAPSE_STREAK` times. A shutdown is over long before that, so it cannot
-  overwrite a full snapshot; genuinely closing most of your sessions is
-  accepted about 90 seconds later.
+  than `COLLAPSE_RATIO` of its sessions — is not promoted until the collapse
+  has persisted across `COLLAPSE_STREAK` captures **and** at least
+  `COLLAPSE_SETTLE_SECONDS` of wall-clock time. A shutdown is over long before
+  that, so it cannot overwrite a full snapshot; genuinely closing most of your
+  sessions is accepted about 90 seconds later.
+
+The run is derived from the history archives, which are append-only and
+uniquely named, rather than a separate counter file. That removes a second
+piece of mutable state that could be corrupted, raced by two overlapping
+captures, or wedged. The time requirement matters because several captures can
+land at once — a manual `agent-tabs snapshot` racing the launchd tick — and
+counting captures alone would clear the guard instantly.
 
 Closing a tab or two is an ordinary change and promotes immediately.
 
