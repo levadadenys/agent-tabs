@@ -126,6 +126,47 @@ def select_window(snap: dict, number: int | None, live: list[dict]) -> tuple[dic
     )
 
 
+def match_all(
+    snap: dict, live: list[dict]
+) -> tuple[list[tuple[int, dict]], list[dict], list[str]]:
+    """Pair every live window with a snapshot window, by tab-title overlap.
+
+    Returns the pairs, the snapshot windows nothing matched, and notes about
+    windows that were deliberately left alone. A snapshot window is claimed by
+    at most one live window: restoring the same sessions into two windows would
+    start every one of them twice.
+    """
+    pairs: list[tuple[int, dict]] = []
+    notes: list[str] = []
+    claimed: set[int] = set()
+
+    for live_index in sorted({t["window_index"] for t in live}):
+        try:
+            matched = match_window(snap, live, live_index)
+        except Ambiguous as exc:
+            notes.append(f"live window {live_index}: {exc}")
+            continue
+        if matched is None:
+            notes.append(
+                f"live window {live_index}: no snapshot window matches its tab titles"
+            )
+            continue
+        index = matched["window_index"]
+        if index in claimed:
+            notes.append(
+                f"live window {live_index}: snapshot window {index} is already "
+                "being restored into another window, so this one was left alone"
+            )
+            continue
+        claimed.add(index)
+        pairs.append((live_index, matched))
+
+    unmatched = [
+        w for w in snap.get("windows", []) if w["window_index"] not in claimed
+    ]
+    return pairs, unmatched, notes
+
+
 def plan(window: dict, live: list[dict], target_window: int | None, force: bool) -> list[Action]:
     own_tty = current_tty()
     busy: dict[int, dict] = {}
