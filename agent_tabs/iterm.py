@@ -35,6 +35,12 @@ def _osascript(script: str) -> str:
     return result.stdout
 
 
+def _as_id(window_id: str) -> str:
+    """Render a window id for AppleScript: numeric bare, anything else quoted."""
+    text = str(window_id)
+    return text if text.lstrip("-").isdigit() else f'"{_escape(text)}"'
+
+
 def _escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace('"', '\\"')
 
@@ -113,11 +119,17 @@ def _enumerate_once() -> list[dict]:
     return rows
 
 
-def run_in_tab(window_index: int, tab_index: int, text: str) -> None:
-    """Type a command into an existing tab and press Enter."""
+def run_in_tab(window_id: str, tab_index: int, text: str) -> None:
+    """Type a command into an existing tab and press Enter.
+
+    Addressed by window *id*, never by index: iTerm's window index is its
+    front-to-back position (`orderedScriptingWindows` in the scripting
+    dictionary), so it changes the moment any window is focused. Typing into
+    "window 2" moments after planning could reach a different window entirely.
+    """
     script = f'''
 tell application "iTerm2"
-    tell current session of tab {tab_index} of window {window_index}
+    tell current session of tab {tab_index} of window id {_as_id(window_id)}
         write text "{_escape(text)}"
     end tell
 end tell
@@ -148,9 +160,9 @@ end tell
     return int(_osascript(script).strip())
 
 
-def create_tab(window_index: int) -> None:
-    """Append one tab to an existing window."""
+def create_tab(window_id: str) -> None:
+    """Append one tab to an existing window, addressed by its stable id."""
     _osascript(
-        f'tell application "iTerm2" to tell window {window_index} '
+        f'tell application "iTerm2" to tell window id {_as_id(window_id)} '
         f"to create tab with default profile"
     )
