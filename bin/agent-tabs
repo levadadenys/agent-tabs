@@ -140,9 +140,17 @@ def cmd_restore_all(args, snap, live) -> int:
         print("\nNo live window matched a snapshot window.", file=sys.stderr)
         for note in notes:
             print(f"  {note}", file=sys.stderr)
+        # The worst case is where per-window commands are most useful, so list
+        # them here too rather than only in the partial-success path.
+        for window in unmatched:
+            tabs = len({t["tab_index"] for t in window["tabs"]})
+            print(
+                f"  snapshot window {window['window_index']} ({tabs} tabs): "
+                f"agent-tabs restore {window['window_index']} --go",
+                file=sys.stderr,
+            )
         print(
-            "\nRun `agent-tabs list`, then restore a window explicitly:"
-            "\n  agent-tabs restore <number> --go",
+            "\nOpen the window you want, then run one of the commands above.",
             file=sys.stderr,
         )
         return 2
@@ -150,10 +158,11 @@ def cmd_restore_all(args, snap, live) -> int:
     planned = []
     total = 0
     for live_index, window in pairs:
-        actions = restore_mod.plan(window, live, live_index, args.force)
+        window_id = restore_mod.window_id_for_index(live, live_index)
+        actions = restore_mod.plan(window, live, window_id, args.force)
         runnable = [a for a in actions if a.will_run]
         total += len(runnable)
-        planned.append((live_index, window, actions))
+        planned.append((live_index, window_id, actions))
         print(
             f"\nsnapshot window {window['window_index']} -> live window "
             f"{live_index}  ({len(runnable)} to start)"
@@ -181,8 +190,11 @@ def cmd_restore_all(args, snap, live) -> int:
         return 0
 
     started = 0
-    for live_index, _window, actions in planned:
-        started += restore_mod.execute(actions, live_index, args.force)
+    for live_index, window_id, actions in planned:
+        if window_id is None:
+            print(f"\nlive window {live_index} vanished before it could be restored.")
+            continue
+        started += restore_mod.execute(actions, window_id, args.force)
     print(f"\nStarted {started} tabs across {len(planned)} windows.")
     return 0
 
@@ -211,7 +223,7 @@ def cmd_restore(args) -> int:
         target = None
         target_label = "a new window"
     else:
-        target = restore_mod.current_window_index(live)
+        target = restore_mod.current_window_id(live)
         if target is None:
             print(
                 "Not running inside an iTerm tab, so there is no current window to fill.\n"
@@ -219,7 +231,7 @@ def cmd_restore(args) -> int:
                 file=sys.stderr,
             )
             return 2
-        target_label = f"live window {target}"
+        target_label = f"live window {restore_mod.current_window_index(live)}"
 
     actions = restore_mod.plan(window, live, target, args.force)
     runnable = [a for a in actions if a.will_run]
@@ -238,9 +250,13 @@ def cmd_restore(args) -> int:
         return 0
 
     if target is None:
-        target = iterm.create_window(max(a.tab_index for a in runnable))
+        created = iterm.create_window(max(a.tab_index for a in runnable))
+        target = restore_mod.window_id_for_index(restore_mod.live_tabs(), created)
+        if target is None:
+            print("Could not identify the new window.", file=sys.stderr)
+            return 2
     ran = restore_mod.execute(actions, target, args.force)
-    print(f"\nStarted {ran} tabs in window {target}.")
+    print(f"\nStarted {ran} tabs.")
     return 0
 
 
