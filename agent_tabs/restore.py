@@ -73,14 +73,33 @@ def current_window_index(tabs: list[dict]) -> int | None:
     return None
 
 
-def match_window(snap: dict, live: list[dict], window_index: int) -> dict | None:
-    """Guess which snapshot window corresponds to a live window, by title overlap.
+def current_window_id(tabs: list[dict]) -> str | None:
+    """The stable id of the window this command is running in."""
+    tty = current_tty()
+    if not tty:
+        return None
+    for tab in tabs:
+        if procs.normalise_tty(tab["tty"]) == tty:
+            return tab["window_id"]
+    return None
 
-    After a crash iTerm restores tab titles but not the processes, so titles are
-    the only carry-over signal available.
+
+def window_id_for_index(tabs: list[dict], window_index: int) -> str | None:
+    for tab in tabs:
+        if tab["window_index"] == window_index:
+            return tab["window_id"]
+    return None
+
+
+def _best_match(snap: dict, live: list[dict], window_index: int) -> tuple[int, dict] | None:
+    """Best-scoring snapshot window for a live window, with its score.
+
+    Raises Ambiguous when two snapshot windows fit equally well.
     """
     live_titles = {
-        t["title"].strip() for t in live if t["window_index"] == window_index and t["title"].strip()
+        t["title"].strip()
+        for t in live
+        if t["window_index"] == window_index and t["title"].strip()
     }
     if not live_titles:
         return None
@@ -101,7 +120,17 @@ def match_window(snap: dict, live: list[dict], window_index: int) -> dict | None
             + " and ".join(f"snapshot window {w['window_index']}" for w in tied)
             + " equally well. Pass the window number explicitly."
         )
-    return tied[0]
+    return best_score, tied[0]
+
+
+def match_window(snap: dict, live: list[dict], window_index: int) -> dict | None:
+    """Guess which snapshot window corresponds to a live window, by title overlap.
+
+    After a crash iTerm restores tab titles but not the processes, so titles are
+    the only carry-over signal available.
+    """
+    best = _best_match(snap, live, window_index)
+    return best[1] if best else None
 
 
 def select_window(snap: dict, number: int | None, live: list[dict]) -> tuple[dict, str]:
@@ -140,17 +169,27 @@ def match_all(
     notes: list[str] = []
     claimed: set[int] = set()
 
+    # Claim in descending confidence, not window order. Window order is
+    # front-to-back position, so claiming greedily by it let a weak partial
+    # match take a snapshot window away from an exact match that happened to
+    # sit further back.
+    candidates: list[tuple[int, int, dict]] = []
     for live_index in sorted({t["window_index"] for t in live}):
         try:
-            matched = match_window(snap, live, live_index)
+            best = _best_match(snap, live, live_index)
         except Ambiguous as exc:
             notes.append(f"live window {live_index}: {exc}")
             continue
-        if matched is None:
+        if best is None:
             notes.append(
                 f"live window {live_index}: no snapshot window matches its tab titles"
             )
             continue
+        candidates.append((best[0], live_index, best[1]))
+
+    for _score, live_index, matched in sorted(
+        candidates, key=lambda c: (-c[0], c[1])
+    ):
         index = matched["window_index"]
         if index in claimed:
             notes.append(
@@ -167,12 +206,12 @@ def match_all(
     return pairs, unmatched, notes
 
 
-def plan(window: dict, live: list[dict], target_window: int | None, force: bool) -> list[Action]:
+def plan(window: dict, live: list[dict], target_window: str | None, force: bool) -> list[Action]:
     own_tty = current_tty()
     busy: dict[int, dict] = {}
     if target_window is not None:
         busy = {
-            t["tab_index"]: t for t in live if t["window_index"] == target_window
+            t["tab_index"]: t for t in live if t["window_id"] == target_window
         }
 
     actions: list[Action] = []
@@ -195,25 +234,28 @@ def plan(window: dict, live: list[dict], target_window: int | None, force: bool)
     return actions
 
 
-def execute(actions: list[Action], target_window: int, force: bool = False) -> int:
+def execute(actions: list[Action], window_id: str, force: bool = False) -> int:
     """Send each runnable action to its tab.
 
-    Re-checks liveness immediately before typing. Planning and execution are
-    separated by however long the operator spent reading the dry run, and a tab
-    that became busy in between must not be typed into -- everything the plan
-    verified was true only at plan time.
+    Targets a window *id*, not an index. iTerm's window index is its
+    front-to-back position, so it changes whenever any window is focused --
+    including while a multi-window restore is part-way through. Keying on the
+    index could type one window's sessions into another.
+
+    Re-checks liveness immediately before typing: planning and execution are
+    separated by however long the operator spent reading the dry run.
     """
     runnable = [a for a in actions if a.will_run]
     if not runnable:
         return 0
-    ensure_tabs(target_window, max(a.tab_index for a in runnable))
+    ensure_tabs(window_id, max(a.tab_index for a in runnable))
 
     busy_now: set[int] = set()
     if not force:
         busy_now = {
             t["tab_index"]
             for t in live_tabs()
-            if t["window_index"] == target_window and t["busy"]
+            if t["window_id"] == window_id and t["busy"]
         }
     own = current_tty()
 
@@ -222,25 +264,25 @@ def execute(actions: list[Action], target_window: int, force: bool = False) -> i
         if action.tab_index in busy_now:
             print(f"  tab {action.tab_index:>2}  SKIP (became busy since the plan)")
             continue
-        if own and _tty_of(target_window, action.tab_index) == own:
+        if own and _tty_of(window_id, action.tab_index) == own:
             print(f"  tab {action.tab_index:>2}  SKIP (this is the tab you are running from)")
             continue
-        iterm.run_in_tab(target_window, action.tab_index, action.command)
+        iterm.run_in_tab(window_id, action.tab_index, action.command)
         ran += 1
     return ran
 
 
-def _tty_of(window_index: int, tab_index: int) -> str | None:
+def _tty_of(window_id: str, tab_index: int) -> str | None:
     for tab in iterm.enumerate_tabs():
-        if tab["window_index"] == window_index and tab["tab_index"] == tab_index:
+        if tab["window_id"] == window_id and tab["tab_index"] == tab_index:
             return procs.normalise_tty(tab["tty"])
     return None
 
 
-def ensure_tabs(target_window: int, needed: int) -> None:
+def ensure_tabs(window_id: str, needed: int) -> None:
     """Add tabs to a live window until it has at least `needed` of them."""
     have = len({
-        t["tab_index"] for t in iterm.enumerate_tabs() if t["window_index"] == target_window
+        t["tab_index"] for t in iterm.enumerate_tabs() if t["window_id"] == window_id
     })
     for _ in range(max(0, needed - have)):
-        iterm.create_tab(target_window)
+        iterm.create_tab(window_id)
