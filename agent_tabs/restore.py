@@ -91,10 +91,17 @@ def window_id_for_index(tabs: list[dict], window_index: int) -> str | None:
     return None
 
 
-def _best_match(snap: dict, live: list[dict], window_index: int) -> tuple[int, dict] | None:
+def _best_match(
+    snap: dict,
+    live: list[dict],
+    window_index: int,
+    exclude: set[int] | None = None,
+) -> tuple[int, dict] | None:
     """Best-scoring snapshot window for a live window, with its score.
 
-    Raises Ambiguous when two snapshot windows fit equally well.
+    Raises Ambiguous when two snapshot windows fit equally well. `exclude`
+    skips snapshot windows already claimed, so a window whose first choice was
+    taken can fall back to its next best rather than going unrestored.
     """
     live_titles = {
         t["title"].strip()
@@ -103,8 +110,11 @@ def _best_match(snap: dict, live: list[dict], window_index: int) -> tuple[int, d
     }
     if not live_titles:
         return None
+    blocked = exclude or set()
     scored = []
     for window in snap.get("windows", []):
+        if window["window_index"] in blocked:
+            continue
         titles = {t["title"].strip() for t in window.get("tabs", []) if t["title"].strip()}
         score = len(titles & live_titles)
         if score:
@@ -190,14 +200,22 @@ def match_all(
     for _score, live_index, matched in sorted(
         candidates, key=lambda c: (-c[0], c[1])
     ):
-        index = matched["window_index"]
-        if index in claimed:
-            notes.append(
-                f"live window {live_index}: snapshot window {index} is already "
-                "being restored into another window, so this one was left alone"
-            )
-            continue
-        claimed.add(index)
+        if matched["window_index"] in claimed:
+            # First choice taken by a stronger match: fall back to the best
+            # remaining one rather than leaving this window unrestored.
+            try:
+                fallback = _best_match(snap, live, live_index, exclude=claimed)
+            except Ambiguous as exc:
+                notes.append(f"live window {live_index}: {exc}")
+                continue
+            if fallback is None:
+                notes.append(
+                    f"live window {live_index}: every snapshot window it matches "
+                    "is already being restored elsewhere, so it was left alone"
+                )
+                continue
+            matched = fallback[1]
+        claimed.add(matched["window_index"])
         pairs.append((live_index, matched))
 
     unmatched = [
