@@ -65,11 +65,20 @@ if it finds one.
 agent-tabs list                 # what the last snapshot holds
 agent-tabs list --kind codex    # only Codex tabs (filters on kind, not title)
 agent-tabs list --commands      # bare restore commands, one per line
+agent-tabs restore --all        # dry run across every window at once
+agent-tabs restore --all --go   # restore the whole fleet
 agent-tabs restore              # dry run, auto-matching the current window
 agent-tabs restore 2            # dry run for snapshot window 2
 agent-tabs restore 2 --go       # actually start the tabs
 agent-tabs restore 2 --go --new-window
 ```
+
+`--all` is the one to reach for after a reboot: it pairs each live window with
+a snapshot window by tab title and restores them in a single pass, instead of
+one invocation per window. A snapshot window is only ever claimed by one live
+window, so nothing starts twice. Anything it cannot match confidently — an
+ambiguous window, or a snapshot window iTerm did not bring back — is listed
+with the command to handle it, never guessed at and never spawned.
 
 Restore is a **dry run by default**. It refuses to write into a tab that holds
 any live process -- an agent, but equally a `vim`, `psql` or `ssh` session
