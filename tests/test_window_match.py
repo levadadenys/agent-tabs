@@ -24,7 +24,7 @@ def snap(*windows):
 
 
 def live(*titles, window=1):
-    return [{"window_index": window, "tab_index": i + 1, "pane_index": 1,
+    return [{"window_index": window, "window_id": f"w{window}", "tab_index": i + 1, "pane_index": 1,
              "tty": f"/dev/ttys00{i}", "title": t, "kind": None, "busy": False}
             for i, t in enumerate(titles)]
 

@@ -27,7 +27,8 @@ def live(*windows):
     rows = []
     for wi, titles in enumerate(windows, start=1):
         for ti, title in enumerate(titles, start=1):
-            rows.append({"window_index": wi, "tab_index": ti, "pane_index": 1,
+            rows.append({"window_index": wi, "window_id": f"w{wi}",
+                         "tab_index": ti, "pane_index": 1,
                          "tty": f"/dev/ttys{wi}{ti}", "title": title,
                          "kind": None, "busy": False})
     return rows
@@ -78,6 +79,28 @@ def test_an_ambiguous_window_is_skipped_not_guessed():
     assert pairs == []
     assert any("equally well" in n for n in notes)
     assert len(unmatched) == 2
+
+
+def test_the_stronger_match_claims_the_window():
+    """Claiming must follow confidence, not window order.
+
+    Window order is front-to-back position, so claiming greedily by it let a
+    weak partial match take a snapshot window away from an exact match sitting
+    further back -- and the weak window then had the wrong sessions typed in.
+    """
+    s = snap(["p", "q", "r"])
+    pairs, unmatched, notes = restore.match_all(
+        s, live(["p", "unrelated"], ["p", "q", "r"])
+    )
+    assert [(w, m["window_index"]) for w, m in pairs] == [(2, 1)], pairs
+    assert any("already being restored" in n for n in notes)
+
+
+def test_the_stronger_match_wins_from_either_side():
+    # Same shape with the windows swapped: the result must not depend on order.
+    s = snap(["p", "q", "r"])
+    pairs, _, _ = restore.match_all(s, live(["p", "q", "r"], ["p", "unrelated"]))
+    assert [(w, m["window_index"]) for w, m in pairs] == [(1, 1)], pairs
 
 
 def test_no_live_windows_pairs_nothing():
