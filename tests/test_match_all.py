@@ -253,6 +253,26 @@ def test_a_partly_forced_group_keeps_its_forced_pairs():
     assert [(w, m["window_index"]) for w, m in pairs] == [(3, 3)], (pairs, notes)
 
 
+def test_a_local_tie_is_resolved_by_the_other_windows():
+    """Codex's case: tied alone, forced together.
+
+    Live 'a,b' ties between snapshots 'a' and 'b' on its own, but live 'a'
+    can only be snapshot 'a', so the complete pairing is forced. Filtering the
+    local tie out before solving left snapshot 'b' unrestored.
+    """
+    pairs, unmatched, _ = restore.match_all(snap(["a"], ["b"]), live(["a", "b"], ["a"]))
+    assert sorted((w, m["window_index"]) for w, m in pairs) == [(1, 2), (2, 1)], pairs
+    assert unmatched == []
+
+
+def test_a_lone_local_tie_is_still_reported():
+    # With nothing else to force it, a tie stays a tie.
+    pairs, unmatched, notes = restore.match_all(snap(["a"], ["b"]), live(["a", "b"]))
+    assert pairs == [], pairs
+    assert any("fits equally well" in n for n in notes), notes
+    assert len(unmatched) == 2
+
+
 def test_no_live_windows_pairs_nothing():
     pairs, unmatched, _ = restore.match_all(snap(["a"]), [])
     assert pairs == []
