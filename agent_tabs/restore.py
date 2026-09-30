@@ -204,8 +204,51 @@ def _groups(order: list[int], scores: dict[int, dict[int, int]]) -> list[list[in
     return list(grouped.values())
 
 
-def _assign_group(order: list[int], scores: dict[int, dict[int, int]]) -> dict[int, int]:
-    """Exact one-to-one assignment within one group.
+def _solve(
+    order: list[int],
+    scores: dict[int, dict[int, int]],
+    bit: dict[int, int],
+    forbid: tuple[int, int | None] | None = None,
+) -> tuple[int, int, tuple] | None:
+    """Best (total overlap, windows restored, picks); None if infeasible.
+
+    `forbid` rules out one (live window, choice) pair, where a choice of None
+    means leaving that window unrestored. Used to test whether a pairing is
+    forced or merely one of several equally good ones.
+    """
+
+    @lru_cache(maxsize=None)
+    def best(i: int, used: int) -> tuple[int, int, tuple] | None:
+        if i == len(order):
+            return (0, 0, ())
+        live = order[i]
+        result = None
+        # Assignment options first, so an equal outcome favours restoring the
+        # front-most window rather than a later one.
+        for snap_index, score in sorted(scores[live].items(), key=lambda kv: (-kv[1], kv[0])):
+            if used & bit[snap_index] or forbid == (live, snap_index):
+                continue
+            sub = best(i + 1, used | bit[snap_index])
+            if sub is None:
+                continue
+            candidate = (sub[0] + score, sub[1] + 1, (snap_index,) + sub[2])
+            if result is None or candidate[:2] > result[:2]:
+                result = candidate
+        if forbid != (live, None):
+            sub = best(i + 1, used)
+            if sub is not None:
+                candidate = (sub[0], sub[1], (None,) + sub[2])
+                if result is None or candidate[:2] > result[:2]:
+                    result = candidate
+        return result
+
+    return best(0, 0)
+
+
+def _assign_group(
+    order: list[int], scores: dict[int, dict[int, int]]
+) -> tuple[dict[int, int], set[int]]:
+    """Exact one-to-one assignment within one group: (claims, ambiguous).
 
     Maximises total title overlap, then windows restored. Greedy claiming --
     by window order, then by confidence -- could spend a snapshot window on a
@@ -213,35 +256,33 @@ def _assign_group(order: list[int], scores: dict[int, dict[int, int]]) -> dict[i
 
     Overlap comes first deliberately. Maximising the number of windows restored
     would give up an obvious 5-of-5 match to manufacture two 1-title matches,
-    typing a window's sessions into one that barely resembles it. A window that
-    loses out is reported and left alone instead.
+    typing a window's sessions into one that barely resembles it.
+
+    Only FORCED pairings are kept: a live window is paired only when every
+    optimal assignment pairs it the same way. Two windows can each have a
+    clear local favourite and still admit two equally good global assignments;
+    picking one would be a guess, and the rule is to report rather than guess.
+    Forced pairings agree across every optimum, so keeping only those can
+    never produce a conflict.
     """
     contested = sorted({idx for live in order for idx in scores[live]})
     bit = {idx: 1 << k for k, idx in enumerate(contested)}
+    top = _solve(order, scores, bit)
+    if top is None:
+        return {}, set()
+    picks = dict(zip(order, top[2]))
 
-    @lru_cache(maxsize=None)
-    def best(i: int, used: int) -> tuple[int, int, tuple]:
-        if i == len(order):
-            return (0, 0, ())
-        options = sorted(scores[order[i]].items(), key=lambda kv: (-kv[1], kv[0]))
-        result = None
-        # Assignment options first, so an equal outcome favours restoring the
-        # front-most window rather than a later one.
-        for snap_index, score in options:
-            if used & bit[snap_index]:
-                continue
-            total, count, picks = best(i + 1, used | bit[snap_index])
-            candidate = (total + score, count + 1, (snap_index,) + picks)
-            if result is None or candidate[:2] > result[:2]:
-                result = candidate
-        total, count, picks = best(i + 1, used)
-        skip = (total, count, (None,) + picks)
-        if result is None or skip[:2] > result[:2]:
-            result = skip
-        return result
+    ambiguous: set[int] = set()
+    for live in order:
+        alternative = _solve(order, scores, bit, forbid=(live, picks[live]))
+        if alternative is not None and alternative[:2] == top[:2]:
+            ambiguous.add(live)
 
-    picks = best(0, 0)[2]
-    return {live: snap for live, snap in zip(order, picks) if snap is not None}
+    claims = {
+        live: snap for live, snap in picks.items()
+        if snap is not None and live not in ambiguous
+    }
+    return claims, ambiguous
 
 
 def _assign(
@@ -259,7 +300,13 @@ def _assign(
                     "restore it explicitly"
                 )
             continue
-        claims.update(_assign_group(sorted(group), scores))
+        group_claims, ambiguous = _assign_group(sorted(group), scores)
+        claims.update(group_claims)
+        for live in sorted(ambiguous):
+            notes.append(
+                f"live window {live}: more than one pairing with the other "
+                "windows fits equally well; restore it explicitly"
+            )
     return claims
 
 
