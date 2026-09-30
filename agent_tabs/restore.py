@@ -172,13 +172,40 @@ def _overlaps(snap: dict, live: list[dict], window_index: int) -> dict[int, int]
     return scores
 
 
-# Exact assignment is exponential in the number of contested snapshot windows.
-# Real sessions have a handful; past this, fall back to confidence order.
+# Exact assignment is exponential in the number of snapshot windows that one
+# group of interlinked live windows competes for. Windows only compete when
+# they share a candidate, so the problem is solved per connected group; real
+# sessions produce groups of one or two. A group larger than this is reported
+# rather than matched approximately -- a silent greedy fallback reintroduced
+# exactly the stranding bug the exact solver exists to prevent.
 EXACT_ASSIGNMENT_LIMIT = 12
 
 
-def _assign(order: list[int], scores: dict[int, dict[int, int]]) -> dict[int, int]:
-    """One-to-one live -> snapshot assignment.
+def _groups(order: list[int], scores: dict[int, dict[int, int]]) -> list[list[int]]:
+    """Split live windows into groups that compete for shared snapshot windows."""
+    parent = {live: live for live in order}
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    owner: dict[int, int] = {}
+    for live in order:
+        for snap_index in scores[live]:
+            if snap_index in owner:
+                parent[find(live)] = find(owner[snap_index])
+            else:
+                owner[snap_index] = live
+    grouped: dict[int, list[int]] = {}
+    for live in order:
+        grouped.setdefault(find(live), []).append(live)
+    return list(grouped.values())
+
+
+def _assign_group(order: list[int], scores: dict[int, dict[int, int]]) -> dict[int, int]:
+    """Exact one-to-one assignment within one group.
 
     Maximises total title overlap, then windows restored. Greedy claiming --
     by window order, then by confidence -- could spend a snapshot window on a
@@ -189,9 +216,7 @@ def _assign(order: list[int], scores: dict[int, dict[int, int]]) -> dict[int, in
     typing a window's sessions into one that barely resembles it. A window that
     loses out is reported and left alone instead.
     """
-    contested = sorted({idx for per in scores.values() for idx in per})
-    if len(contested) > EXACT_ASSIGNMENT_LIMIT:
-        return _assign_greedy(order, scores)
+    contested = sorted({idx for live in order for idx in scores[live]})
     bit = {idx: 1 << k for k, idx in enumerate(contested)}
 
     @lru_cache(maxsize=None)
@@ -219,19 +244,22 @@ def _assign(order: list[int], scores: dict[int, dict[int, int]]) -> dict[int, in
     return {live: snap for live, snap in zip(order, picks) if snap is not None}
 
 
-def _assign_greedy(order: list[int], scores: dict[int, dict[int, int]]) -> dict[int, int]:
-    """Fallback for very many windows: highest-confidence claims first."""
+def _assign(
+    order: list[int], scores: dict[int, dict[int, int]], notes: list[str]
+) -> dict[int, int]:
+    """Assign every group exactly; report any group too tangled to solve."""
     claims: dict[int, int] = {}
-    taken: set[int] = set()
-    ranked = sorted(
-        ((score, live, snap) for live in order for snap, score in scores[live].items()),
-        key=lambda c: (-c[0], c[1], c[2]),
-    )
-    for _score, live, snap in ranked:
-        if live in claims or snap in taken:
+    for group in _groups(order, scores):
+        contested = {idx for live in group for idx in scores[live]}
+        if len(contested) > EXACT_ASSIGNMENT_LIMIT:
+            for live in group:
+                notes.append(
+                    f"live window {live}: shares titles with too many other "
+                    f"windows ({len(contested)} candidates) to match confidently; "
+                    "restore it explicitly"
+                )
             continue
-        claims[live] = snap
-        taken.add(snap)
+        claims.update(_assign_group(sorted(group), scores))
     return claims
 
 
@@ -266,12 +294,14 @@ def match_all(
         order.append(live_index)
         scores[live_index] = _overlaps(snap, live, live_index)
 
-    claims = _assign(order, scores)
+    already_noted = len(notes)
+    claims = _assign(order, scores, notes)
+    reported = {n.split(":")[0] for n in notes[already_noted:]}
     by_index = {w["window_index"]: w for w in snap.get("windows", [])}
     pairs = [(live_index, by_index[claims[live_index]]) for live_index in order
              if live_index in claims]
     for live_index in order:
-        if live_index not in claims:
+        if live_index not in claims and f"live window {live_index}" not in reported:
             notes.append(
                 f"live window {live_index}: every snapshot window it matches "
                 "is already being restored elsewhere, so it was left alone"
