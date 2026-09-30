@@ -162,16 +162,46 @@ def test_a_strong_match_is_not_sacrificed_for_two_weak_ones():
     assert any("live window 2" in n for n in notes), notes
 
 
-def test_the_greedy_fallback_still_claims_once():
-    # Past the exact-assignment limit the fallback must keep the one-claim rule.
+def test_many_unrelated_windows_do_not_degrade_the_assignment():
+    """Copilot's case: the stranding pair plus enough other windows to cross
+    the exact-assignment limit.
+
+    A global limit fell back to greedy claiming and stranded live 2 again.
+    Windows only compete within a group that shares candidates, so the pair is
+    still solved exactly however many unrelated windows are open.
+    """
+    extra = [[f"solo{i}"] for i in range(restore.EXACT_ASSIGNMENT_LIMIT + 2)]
+    s = snap(["a", "b", "c"], ["d", "e"], *extra)
+    l = live(["a", "b", "c", "d", "e"], ["a", "b", "c"], *extra)
+    pairs, unmatched, _ = restore.match_all(s, l)
+    got = dict((w, m["window_index"]) for w, m in pairs)
+    assert got[1] == 2 and got[2] == 1, got
+    assert len(pairs) == len(extra) + 2, "an unrelated window went unrestored"
+    assert unmatched == []
+
+
+def test_a_group_too_tangled_to_solve_is_reported_not_guessed():
+    # Past the limit within ONE group, the windows are reported, never paired
+    # approximately.
     orig = restore.EXACT_ASSIGNMENT_LIMIT
-    restore.EXACT_ASSIGNMENT_LIMIT = 0
+    restore.EXACT_ASSIGNMENT_LIMIT = 1
     try:
-        s = snap(["a", "b"])
-        pairs, _, _ = restore.match_all(s, live(["a", "b"], ["a", "b"]))
-        assert len(pairs) == 1, pairs
+        s = snap(["a", "b", "c"], ["d", "e"])
+        pairs, unmatched, notes = restore.match_all(
+            s, live(["a", "b", "c", "d", "e"], ["a", "b", "c"])
+        )
+        assert pairs == [], pairs
+        assert sum("too many other windows" in n for n in notes) == 2, notes
+        assert len(unmatched) == 2
     finally:
         restore.EXACT_ASSIGNMENT_LIMIT = orig
+
+
+def test_grouping_keeps_independent_windows_apart():
+    groups = restore._groups(
+        [1, 2, 3], {1: {10: 3, 11: 2}, 2: {10: 3}, 3: {20: 1}}
+    )
+    assert sorted(sorted(g) for g in groups) == [[1, 2], [3]], groups
 
 
 def test_no_live_windows_pairs_nothing():
