@@ -367,7 +367,38 @@ def match_all(
     return pairs, unmatched, notes
 
 
-def plan(window: dict, live: list[dict], target_window: str | None, force: bool) -> list[Action]:
+def running_sessions() -> dict[str, str]:
+    """Agent sessions live right now, by session id -> where they are running.
+
+    Restore must not start a session that is already running elsewhere: after
+    a reboot you may have resumed a few by hand before restoring, and starting
+    them again gives a duplicate (Claude, for one, starts a copy).
+    """
+    running: dict[str, str] = {}
+    for window in snap_mod.build().get("windows", []):
+        for tab in window.get("tabs", []):
+            session = tab.get("session_id")
+            if session and tab.get("kind") in adapters.AGENT_KINDS:
+                running.setdefault(
+                    session, f"live window {window['window_index']} tab {tab['tab_index']}"
+                )
+    return running
+
+
+def plan(
+    window: dict,
+    live: list[dict],
+    target_window: str | None,
+    force: bool,
+    running: dict[str, str] | None = None,
+) -> list[Action]:
+    """Decide what to type into each tab.
+
+    `force` lets restore type into a tab that is busy. It does not override
+    `running`: starting a session that is already running elsewhere is never
+    wanted, whatever the tab it would land in.
+    """
+    running = running or {}
     own_tty = current_tty()
     busy: dict[int, dict] = {}
     if target_window is not None:
@@ -385,8 +416,11 @@ def plan(window: dict, live: list[dict], target_window: str | None, force: bool)
         seen_tabs.add(index)
         action = Action(index, tab.get("title") or "", tab.get("kind") or "", tab.get("restore") or "")
         existing = busy.get(index)
+        session = tab.get("session_id")
         if not action.command:
             action.skip_reason = "nothing recorded"
+        elif session and session in running:
+            action.skip_reason = f"session already running in {running[session]}"
         elif existing and procs.normalise_tty(existing["tty"]) == own_tty:
             action.skip_reason = "this is the tab you are running from"
         elif existing and existing.get("busy") and not force:
@@ -436,6 +470,19 @@ def execute(actions: list[Action], window_id: str, force: bool = False) -> int:
         iterm.run_in_tab(window_id, action.tab_index, action.command)
         ran += 1
     return ran
+
+
+def restore_into_new_window(actions: list[Action], force: bool = False) -> int:
+    """Create a window for a snapshot window nothing matched, then fill it.
+
+    The window's id is captured by the script that creates it, so focusing
+    another window meanwhile cannot redirect the restore.
+    """
+    runnable = [a for a in actions if a.will_run]
+    if not runnable:
+        return 0
+    window_id = iterm.create_window(max(a.tab_index for a in runnable))
+    return execute(actions, window_id, force)
 
 
 def _tty_of(window_id: str, tab_index: int) -> str | None:
