@@ -111,7 +111,10 @@ def cmd_list(args) -> int:
     if wanted and not shown:
         print(f"\nNo tabs of kind: {', '.join(sorted(wanted))}")
         return 0
-    print("\nRestore a window with:  agent-tabs restore <window-number> --go")
+    print(
+        "\nRestore everything:  agent-tabs restore --all            (dry run; add --go)"
+        "\n  windows iTerm did not bring back:  add --create-missing"
+    )
     return 0
 
 
