@@ -75,10 +75,23 @@ agent-tabs restore 2 --go --new-window
 
 `--all` is the one to reach for after a reboot: it pairs each live window with
 a snapshot window by tab title and restores them in a single pass, instead of
-one invocation per window. A snapshot window is only ever claimed by one live
-window, so nothing starts twice. Anything it cannot match confidently — an
-ambiguous window, or a snapshot window iTerm did not bring back — is listed
-with the command to handle it, never guessed at and never spawned.
+one invocation per window.
+
+How it pairs, since a wrong pairing types one window's sessions into another:
+
+- windows are matched by how many tab titles they share, as a one-to-one
+  assignment that maximises total overlap — so a snapshot window is restored
+  into at most one live window and nothing starts twice;
+- a pairing is used only when it is **forced**: the same in every best
+  assignment. If the evidence fits two pairings equally well, those windows
+  are reported, never guessed at;
+- windows are targeted by iTerm's stable window id, not their position, which
+  changes whenever you focus a window.
+
+Anything it cannot match confidently — an ambiguous window, a group of more
+than 12 windows sharing titles, or a snapshot window iTerm did not bring
+back — is listed with the command to handle it, never guessed at and never
+spawned.
 
 Restore is a **dry run by default**. It refuses to write into a tab that holds
 any live process -- an agent, but equally a `vim`, `psql` or `ssh` session
