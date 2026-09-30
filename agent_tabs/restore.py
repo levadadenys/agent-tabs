@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from dataclasses import dataclass
 
 from . import adapters, iterm, procs, snapshot as snap_mod
@@ -91,17 +92,10 @@ def window_id_for_index(tabs: list[dict], window_index: int) -> str | None:
     return None
 
 
-def _best_match(
-    snap: dict,
-    live: list[dict],
-    window_index: int,
-    exclude: set[int] | None = None,
-) -> tuple[int, dict] | None:
+def _best_match(snap: dict, live: list[dict], window_index: int) -> tuple[int, dict] | None:
     """Best-scoring snapshot window for a live window, with its score.
 
-    Raises Ambiguous when two snapshot windows fit equally well. `exclude`
-    skips snapshot windows already claimed, so a window whose first choice was
-    taken can fall back to its next best rather than going unrestored.
+    Raises Ambiguous when two snapshot windows fit equally well.
     """
     live_titles = {
         t["title"].strip()
@@ -110,11 +104,8 @@ def _best_match(
     }
     if not live_titles:
         return None
-    blocked = exclude or set()
     scored = []
     for window in snap.get("windows", []):
-        if window["window_index"] in blocked:
-            continue
         titles = {t["title"].strip() for t in window.get("tabs", []) if t["title"].strip()}
         score = len(titles & live_titles)
         if score:
@@ -165,6 +156,85 @@ def select_window(snap: dict, number: int | None, live: list[dict]) -> tuple[dic
     )
 
 
+def _overlaps(snap: dict, live: list[dict], window_index: int) -> dict[int, int]:
+    """Title overlap between one live window and every snapshot window."""
+    live_titles = {
+        t["title"].strip()
+        for t in live
+        if t["window_index"] == window_index and t["title"].strip()
+    }
+    scores: dict[int, int] = {}
+    for window in snap.get("windows", []):
+        titles = {t["title"].strip() for t in window.get("tabs", []) if t["title"].strip()}
+        score = len(titles & live_titles)
+        if score:
+            scores[window["window_index"]] = score
+    return scores
+
+
+# Exact assignment is exponential in the number of contested snapshot windows.
+# Real sessions have a handful; past this, fall back to confidence order.
+EXACT_ASSIGNMENT_LIMIT = 12
+
+
+def _assign(order: list[int], scores: dict[int, dict[int, int]]) -> dict[int, int]:
+    """One-to-one live -> snapshot assignment.
+
+    Maximises total title overlap, then windows restored. Greedy claiming --
+    by window order, then by confidence -- could spend a snapshot window on a
+    live window that had an alternative, stranding one that had none.
+
+    Overlap comes first deliberately. Maximising the number of windows restored
+    would give up an obvious 5-of-5 match to manufacture two 1-title matches,
+    typing a window's sessions into one that barely resembles it. A window that
+    loses out is reported and left alone instead.
+    """
+    contested = sorted({idx for per in scores.values() for idx in per})
+    if len(contested) > EXACT_ASSIGNMENT_LIMIT:
+        return _assign_greedy(order, scores)
+    bit = {idx: 1 << k for k, idx in enumerate(contested)}
+
+    @lru_cache(maxsize=None)
+    def best(i: int, used: int) -> tuple[int, int, tuple]:
+        if i == len(order):
+            return (0, 0, ())
+        options = sorted(scores[order[i]].items(), key=lambda kv: (-kv[1], kv[0]))
+        result = None
+        # Assignment options first, so an equal outcome favours restoring the
+        # front-most window rather than a later one.
+        for snap_index, score in options:
+            if used & bit[snap_index]:
+                continue
+            total, count, picks = best(i + 1, used | bit[snap_index])
+            candidate = (total + score, count + 1, (snap_index,) + picks)
+            if result is None or candidate[:2] > result[:2]:
+                result = candidate
+        total, count, picks = best(i + 1, used)
+        skip = (total, count, (None,) + picks)
+        if result is None or skip[:2] > result[:2]:
+            result = skip
+        return result
+
+    picks = best(0, 0)[2]
+    return {live: snap for live, snap in zip(order, picks) if snap is not None}
+
+
+def _assign_greedy(order: list[int], scores: dict[int, dict[int, int]]) -> dict[int, int]:
+    """Fallback for very many windows: highest-confidence claims first."""
+    claims: dict[int, int] = {}
+    taken: set[int] = set()
+    ranked = sorted(
+        ((score, live, snap) for live in order for snap, score in scores[live].items()),
+        key=lambda c: (-c[0], c[1], c[2]),
+    )
+    for _score, live, snap in ranked:
+        if live in claims or snap in taken:
+            continue
+        claims[live] = snap
+        taken.add(snap)
+    return claims
+
+
 def match_all(
     snap: dict, live: list[dict]
 ) -> tuple[list[tuple[int, dict]], list[dict], list[str]]:
@@ -174,16 +244,14 @@ def match_all(
     windows that were deliberately left alone. A snapshot window is claimed by
     at most one live window: restoring the same sessions into two windows would
     start every one of them twice.
-    """
-    pairs: list[tuple[int, dict]] = []
-    notes: list[str] = []
-    claimed: set[int] = set()
 
-    # Claim in descending confidence, not window order. Window order is
-    # front-to-back position, so claiming greedily by it let a weak partial
-    # match take a snapshot window away from an exact match that happened to
-    # sit further back.
-    candidates: list[tuple[int, int, dict]] = []
+    A live window whose best overlap is tied between snapshot windows is left
+    alone rather than guessed at, as before. The rest are assigned exactly.
+    """
+    notes: list[str] = []
+    order: list[int] = []
+    scores: dict[int, dict[int, int]] = {}
+
     for live_index in sorted({t["window_index"] for t in live}):
         try:
             best = _best_match(snap, live, live_index)
@@ -195,29 +263,21 @@ def match_all(
                 f"live window {live_index}: no snapshot window matches its tab titles"
             )
             continue
-        candidates.append((best[0], live_index, best[1]))
+        order.append(live_index)
+        scores[live_index] = _overlaps(snap, live, live_index)
 
-    for _score, live_index, matched in sorted(
-        candidates, key=lambda c: (-c[0], c[1])
-    ):
-        if matched["window_index"] in claimed:
-            # First choice taken by a stronger match: fall back to the best
-            # remaining one rather than leaving this window unrestored.
-            try:
-                fallback = _best_match(snap, live, live_index, exclude=claimed)
-            except Ambiguous as exc:
-                notes.append(f"live window {live_index}: {exc}")
-                continue
-            if fallback is None:
-                notes.append(
-                    f"live window {live_index}: every snapshot window it matches "
-                    "is already being restored elsewhere, so it was left alone"
-                )
-                continue
-            matched = fallback[1]
-        claimed.add(matched["window_index"])
-        pairs.append((live_index, matched))
+    claims = _assign(order, scores)
+    by_index = {w["window_index"]: w for w in snap.get("windows", [])}
+    pairs = [(live_index, by_index[claims[live_index]]) for live_index in order
+             if live_index in claims]
+    for live_index in order:
+        if live_index not in claims:
+            notes.append(
+                f"live window {live_index}: every snapshot window it matches "
+                "is already being restored elsewhere, so it was left alone"
+            )
 
+    claimed = set(claims.values())
     unmatched = [
         w for w in snap.get("windows", []) if w["window_index"] not in claimed
     ]
@@ -265,6 +325,11 @@ def execute(actions: list[Action], window_id: str, force: bool = False) -> int:
     """
     runnable = [a for a in actions if a.will_run]
     if not runnable:
+        return 0
+    # A window closed since planning must get nothing: not new tabs, and not
+    # keystrokes. Checked here rather than left to an AppleScript error.
+    if not any(t["window_id"] == window_id for t in iterm.enumerate_tabs()):
+        print(f"  window {window_id} is gone; nothing typed into it")
         return 0
     ensure_tabs(window_id, max(a.tab_index for a in runnable))
 
