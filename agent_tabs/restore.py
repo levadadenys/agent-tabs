@@ -320,26 +320,28 @@ def match_all(
     at most one live window: restoring the same sessions into two windows would
     start every one of them twice.
 
-    A live window whose best overlap is tied between snapshot windows is left
-    alone rather than guessed at, as before. The rest are assigned exactly.
+    Pairings are assigned exactly, and kept only when forced: a window is left
+    alone whenever another pairing would fit the evidence equally well once
+    every other window is taken into account.
     """
     notes: list[str] = []
     order: list[int] = []
     scores: dict[int, dict[int, int]] = {}
 
+    # Every window with any overlap goes to the solver, tied or not. A window
+    # that ties on its own can be forced by the others -- live 'a,b' ties
+    # between snapshots 'a' and 'b', but if another live window can only be
+    # 'a', it must be 'b'. Filtering local ties out first left 'b' unrestored.
+    # Ambiguity is decided by the solver, after every window is considered.
     for live_index in sorted({t["window_index"] for t in live}):
-        try:
-            best = _best_match(snap, live, live_index)
-        except Ambiguous as exc:
-            notes.append(f"live window {live_index}: {exc}")
-            continue
-        if best is None:
+        overlaps = _overlaps(snap, live, live_index)
+        if not overlaps:
             notes.append(
                 f"live window {live_index}: no snapshot window matches its tab titles"
             )
             continue
         order.append(live_index)
-        scores[live_index] = _overlaps(snap, live, live_index)
+        scores[live_index] = overlaps
 
     already_noted = len(notes)
     claims = _assign(order, scores, notes)
