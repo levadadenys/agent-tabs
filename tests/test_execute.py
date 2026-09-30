@@ -138,15 +138,13 @@ def test_typing_survives_the_window_index_moving():
 
 
 def test_a_window_that_disappeared_types_nothing():
-    fake = FakeITerm(tabs=3, window_id="gone-id")
+    """A window closed after planning must receive nothing at all."""
+    fake = FakeITerm(tabs=3, window_id="still-here")
     install(fake)
-    # ensure_tabs sees no tabs for an unknown id and would create them; assert
-    # we never type into a window that is not there.
-    try:
-        restore.execute(actions((1, "cmd1", None)), "some-other-id")
-    except AssertionError:
-        pass  # FakeITerm refuses to create tabs in a window that is not its own
-    assert all(w == "some-other-id" for w, _, _ in fake.typed) or not fake.typed
+    ran = restore.execute(actions((1, "cmd1", None), (2, "cmd2", None)), "gone")
+    assert ran == 0
+    assert fake.typed == [], f"typed into a vanished window: {fake.typed}"
+    assert fake.created == 0, "created tabs in a vanished window"
 
 
 if __name__ == "__main__":

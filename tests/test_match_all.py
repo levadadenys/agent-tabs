@@ -129,6 +129,51 @@ def test_a_window_with_no_remaining_option_is_reported():
     assert any("already being restored elsewhere" in n for n in notes), notes
 
 
+def test_assignment_restores_both_when_greedy_would_strand_one():
+    """The case greedy claiming got wrong.
+
+    Live 1 overlaps snapshot 1 by 3 and snapshot 2 by 2; live 2 overlaps only
+    snapshot 1, by 3. Equal top scores sent live 1 to snapshot 1 and stranded
+    live 2. Assigning 1 -> 2 and 2 -> 1 restores both.
+    """
+    s = snap(["a", "b", "c"], ["d", "e"])
+    pairs, unmatched, _ = restore.match_all(
+        s, live(["a", "b", "c", "d", "e"], ["a", "b", "c"])
+    )
+    got = sorted((w, m["window_index"]) for w, m in pairs)
+    assert got == [(1, 2), (2, 1)], got
+    assert unmatched == []
+
+
+def test_a_strong_match_is_not_sacrificed_for_two_weak_ones():
+    """Overlap outranks the number of windows restored.
+
+    Live 1 is obviously snapshot 1 (5 of 5 titles); live 2 shares one title
+    with it. Maximising windows restored would send live 1 to snapshot 2 (one
+    title) and type snapshot 1's five sessions into live 2 -- the wrong window.
+    Live 1 keeps its match; live 2 is reported and left alone.
+    """
+    s = snap(["a", "b", "c", "d", "e"], ["f"])
+    pairs, unmatched, notes = restore.match_all(
+        s, live(["a", "b", "c", "d", "e", "f"], ["a"])
+    )
+    assert [(w, m["window_index"]) for w, m in pairs] == [(1, 1)], pairs
+    assert [w["window_index"] for w in unmatched] == [2]
+    assert any("live window 2" in n for n in notes), notes
+
+
+def test_the_greedy_fallback_still_claims_once():
+    # Past the exact-assignment limit the fallback must keep the one-claim rule.
+    orig = restore.EXACT_ASSIGNMENT_LIMIT
+    restore.EXACT_ASSIGNMENT_LIMIT = 0
+    try:
+        s = snap(["a", "b"])
+        pairs, _, _ = restore.match_all(s, live(["a", "b"], ["a", "b"]))
+        assert len(pairs) == 1, pairs
+    finally:
+        restore.EXACT_ASSIGNMENT_LIMIT = orig
+
+
 def test_no_live_windows_pairs_nothing():
     pairs, unmatched, _ = restore.match_all(snap(["a"]), [])
     assert pairs == []
