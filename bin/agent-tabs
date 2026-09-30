@@ -114,9 +114,105 @@ def cmd_list(args) -> int:
     return 0
 
 
+def _print_plan(window, actions, warnings) -> None:
+    for action in actions:
+        if action.will_run:
+            print(f"  tab {action.tab_index:>2}  {action.command}")
+        else:
+            print(f"  tab {action.tab_index:>2}  SKIP ({action.skip_reason})")
+        if action.tab_index in warnings:
+            print(f"          !! {warnings[action.tab_index]}")
+
+
+def _warnings_for(window: dict) -> dict:
+    return {
+        t["tab_index"]: t["warning"]
+        for t in window.get("tabs", []) if t.get("warning")
+    }
+
+
+def cmd_restore_all(args, snap, live) -> int:
+    """Restore every live window that matches a snapshot window, in one pass."""
+    pairs, unmatched, notes = restore_mod.match_all(snap, live)
+
+    print(f"Snapshot captured {snap['captured_at']}  ({age_of(snap['captured_at'])})")
+    if not pairs:
+        print("\nNo live window matched a snapshot window.", file=sys.stderr)
+        for note in notes:
+            print(f"  {note}", file=sys.stderr)
+        # The worst case is where per-window commands are most useful, so list
+        # them here too rather than only in the partial-success path.
+        for window in unmatched:
+            tabs = len({t["tab_index"] for t in window["tabs"]})
+            print(
+                f"  snapshot window {window['window_index']} ({tabs} tabs): "
+                f"agent-tabs restore {window['window_index']} --go",
+                file=sys.stderr,
+            )
+        print(
+            "\nOpen the window you want, then run one of the commands above.",
+            file=sys.stderr,
+        )
+        return 2
+
+    planned = []
+    total = 0
+    for live_index, window in pairs:
+        window_id = restore_mod.window_id_for_index(live, live_index)
+        actions = restore_mod.plan(window, live, window_id, args.force)
+        runnable = [a for a in actions if a.will_run]
+        total += len(runnable)
+        planned.append((live_index, window_id, actions))
+        print(
+            f"\nsnapshot window {window['window_index']} -> live window "
+            f"{live_index}  ({len(runnable)} to start)"
+        )
+        _print_plan(window, actions, _warnings_for(window))
+
+    if unmatched or notes:
+        print("\nNot restored:")
+        for note in notes:
+            print(f"  {note}")
+        for window in unmatched:
+            tabs = len({t["tab_index"] for t in window["tabs"]})
+            print(
+                f"  snapshot window {window['window_index']} ({tabs} tabs): no live "
+                f"window matched — open one and run:  agent-tabs restore "
+                f"{window['window_index']} --go"
+            )
+
+    if not args.go:
+        print(f"\nDry run. {total} tabs would start across {len(planned)} windows.")
+        print("Add --go to execute.")
+        return 0
+    if total == 0:
+        print("\nNothing to do.")
+        return 0
+
+    started = 0
+    for live_index, window_id, actions in planned:
+        if window_id is None:
+            print(f"\nlive window {live_index} vanished before it could be restored.")
+            continue
+        started += restore_mod.execute(actions, window_id, args.force)
+    print(f"\nStarted {started} tabs across {len(planned)} windows.")
+    return 0
+
+
 def cmd_restore(args) -> int:
     snap = snap_mod.load(Path(args.file) if args.file else None)
     live = restore_mod.live_tabs()
+
+    if args.all:
+        if args.window is not None or args.new_window:
+            print(
+                "--all restores every matching window, so it cannot be combined "
+                "with a window number or --new-window.",
+                file=sys.stderr,
+            )
+            return 2
+        return cmd_restore_all(args, snap, live)
+
     try:
         window, how = restore_mod.select_window(snap, args.window, live)
     except ValueError as exc:  # includes restore_mod.Ambiguous
@@ -127,7 +223,7 @@ def cmd_restore(args) -> int:
         target = None
         target_label = "a new window"
     else:
-        target = restore_mod.current_window_index(live)
+        target = restore_mod.current_window_id(live)
         if target is None:
             print(
                 "Not running inside an iTerm tab, so there is no current window to fill.\n"
@@ -135,7 +231,7 @@ def cmd_restore(args) -> int:
                 file=sys.stderr,
             )
             return 2
-        target_label = f"live window {target}"
+        target_label = f"live window {restore_mod.current_window_index(live)}"
 
     actions = restore_mod.plan(window, live, target, args.force)
     runnable = [a for a in actions if a.will_run]
@@ -144,17 +240,7 @@ def cmd_restore(args) -> int:
     # a recorder that died hours ago looks identical to a healthy one.
     print(f"Snapshot captured {snap['captured_at']}  ({age_of(snap['captured_at'])})")
     print(f"Restoring {how} into {target_label}\n")
-    warnings = {
-        t["tab_index"]: t["warning"]
-        for t in window.get("tabs", []) if t.get("warning")
-    }
-    for action in actions:
-        if action.will_run:
-            print(f"  tab {action.tab_index:>2}  {action.command}")
-        else:
-            print(f"  tab {action.tab_index:>2}  SKIP ({action.skip_reason})")
-        if action.tab_index in warnings:
-            print(f"          !! {warnings[action.tab_index]}")
+    _print_plan(window, actions, _warnings_for(window))
 
     if not args.go:
         print(f"\nDry run. {len(runnable)} tabs would start. Add --go to execute.")
@@ -166,7 +252,7 @@ def cmd_restore(args) -> int:
     if target is None:
         target = iterm.create_window(max(a.tab_index for a in runnable))
     ran = restore_mod.execute(actions, target, args.force)
-    print(f"\nStarted {ran} tabs in window {target}.")
+    print(f"\nStarted {ran} tabs.")
     return 0
 
 
@@ -202,6 +288,10 @@ def main() -> int:
     p_restore.add_argument("-f", "--file", help="read a specific snapshot file")
     p_restore.add_argument("--go", action="store_true", help="actually run (default is a dry run)")
     p_restore.add_argument("--new-window", action="store_true", help="build a fresh window")
+    p_restore.add_argument(
+        "--all", action="store_true",
+        help="restore every live window that matches a snapshot window",
+    )
     p_restore.add_argument("--force", action="store_true", help="overwrite tabs already running an agent")
     p_restore.set_defaults(func=cmd_restore)
 

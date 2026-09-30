@@ -18,22 +18,29 @@ what the snapshot preserves.
    agent-tabs list
    ```
 
-2. From inside a tab of the window you want to rebuild, dry-run it. With no
-   window number it auto-matches by tab title, since iTerm restores tab titles
-   after a crash:
+2. Dry-run the whole fleet. `--all` pairs every live window with a snapshot
+   window by tab title, which works because iTerm restores tab titles after a
+   crash or reboot:
 
    ```bash
-   agent-tabs restore          # dry run, auto-matched
+   agent-tabs restore --all    # dry run, every window
+   ```
+
+   For a single window, run it from inside that window:
+
+   ```bash
+   agent-tabs restore          # dry run, auto-matched to this window
    agent-tabs restore 2        # dry run, snapshot window 2
    ```
 
 3. Execute once the plan looks right:
 
    ```bash
-   agent-tabs restore --go
+   agent-tabs restore --all --go
    ```
 
-Repeat per window. Tabs holding any live process (an agent, but also vim, psql
+`--all` reports anything it could not match rather than guessing, and never
+creates windows. Tabs holding any live process (an agent, but also vim, psql
 or an ssh session) are skipped, as is the tab the command runs from.
 
 ## If there is no snapshot

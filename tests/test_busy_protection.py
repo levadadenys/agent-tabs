@@ -52,10 +52,10 @@ def _plan_for(live_kind: str, busy: bool):
         "tabs": [{"tab_index": 1, "pane_index": 1, "title": "A", "kind": "claude",
                   "restore": "cd /repo && claude --resume aaa"}],
     }
-    live = [{"window_index": 1, "tab_index": 1, "pane_index": 1, "tty": "/dev/ttys001",
+    live = [{"window_index": 1, "window_id": "w1", "tab_index": 1, "pane_index": 1, "tty": "/dev/ttys001",
              "title": "A", "kind": live_kind, "busy": busy}]
     restore.current_tty = lambda: "ttys999"  # type: ignore[assignment]
-    return restore.plan(window, live, 1, force=False)[0]
+    return restore.plan(window, live, "w1", force=False)[0]
 
 
 def test_planner_skips_a_live_ssh_tab_without_force():

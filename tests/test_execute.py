@@ -15,23 +15,28 @@ from runner import run  # noqa: E402
 
 
 class FakeITerm:
-    def __init__(self, tabs=3, window=1):
+    """A window whose front-to-back index can move under us mid-run."""
+
+    def __init__(self, tabs=3, window=1, window_id="w1"):
         self.window = window
+        self.window_id = window_id
         self.tabs = tabs
         self.typed: list[tuple[int, int, str]] = []
         self.created = 0
 
     def enumerate_tabs(self):
         return [
-            {"window_index": self.window, "tab_index": i + 1, "pane_index": 1,
+            {"window_index": self.window, "window_id": self.window_id,
+             "tab_index": i + 1, "pane_index": 1,
              "tty": f"/dev/ttys10{i}", "title": f"t{i}"}
             for i in range(self.tabs)
         ]
 
-    def run_in_tab(self, window, tab, text):
-        self.typed.append((window, tab, text))
+    def run_in_tab(self, window_id, tab, text):
+        self.typed.append((window_id, tab, text))
 
-    def create_tab(self, window):
+    def create_tab(self, window_id):
+        assert window_id == self.window_id, f"created a tab in {window_id}"
         self.created += 1
         self.tabs += 1
 
@@ -58,29 +63,29 @@ def actions(*specs):
 def test_sends_one_command_per_runnable_action():
     fake = FakeITerm(tabs=3)
     install(fake)
-    ran = restore.execute(actions((1, "cmd1", None), (2, "cmd2", None)), 1)
+    ran = restore.execute(actions((1, "cmd1", None), (2, "cmd2", None)), "w1")
     assert ran == 2
-    assert fake.typed == [(1, 1, "cmd1"), (1, 2, "cmd2")]
+    assert fake.typed == [("w1", 1, "cmd1"), ("w1", 2, "cmd2")]
 
 
 def test_never_sends_a_skipped_action():
     fake = FakeITerm(tabs=3)
     install(fake)
-    restore.execute(actions((1, "cmd1", "already running claude"), (2, "cmd2", None)), 1)
-    assert fake.typed == [(1, 2, "cmd2")], fake.typed
+    restore.execute(actions((1, "cmd1", "already running claude"), (2, "cmd2", None)), "w1")
+    assert fake.typed == [("w1", 2, "cmd2")], fake.typed
 
 
 def test_creates_exactly_the_missing_tabs():
     fake = FakeITerm(tabs=2)
     install(fake)
-    restore.execute(actions((1, "a", None), (4, "d", None)), 1)
+    restore.execute(actions((1, "a", None), (4, "d", None)), "w1")
     assert fake.created == 2, f"expected 2 new tabs, created {fake.created}"
 
 
 def test_creates_nothing_when_tabs_already_exist():
     fake = FakeITerm(tabs=5)
     install(fake)
-    restore.execute(actions((1, "a", None)), 1)
+    restore.execute(actions((1, "a", None)), "w1")
     assert fake.created == 0
 
 
@@ -88,30 +93,58 @@ def test_a_tab_that_became_busy_after_planning_is_skipped():
     # The gap between the dry run and --go is however long the operator reads.
     fake = FakeITerm(tabs=3)
     install(fake, busy_tabs={2})
-    ran = restore.execute(actions((1, "a", None), (2, "b", None)), 1)
+    ran = restore.execute(actions((1, "a", None), (2, "b", None)), "w1")
     assert ran == 1
-    assert fake.typed == [(1, 1, "a")], fake.typed
+    assert fake.typed == [("w1", 1, "a")], fake.typed
 
 
 def test_force_overrides_a_tab_that_became_busy():
     fake = FakeITerm(tabs=3)
     install(fake, busy_tabs={2})
-    ran = restore.execute(actions((1, "a", None), (2, "b", None)), 1, force=True)
+    ran = restore.execute(actions((1, "a", None), (2, "b", None)), "w1", force=True)
     assert ran == 2
 
 
 def test_never_types_into_our_own_tab():
     fake = FakeITerm(tabs=3)
     install(fake, own_tty="ttys101")  # tab 2
-    restore.execute(actions((1, "a", None), (2, "b", None)), 1)
-    assert fake.typed == [(1, 1, "a")], fake.typed
+    restore.execute(actions((1, "a", None), (2, "b", None)), "w1")
+    assert fake.typed == [("w1", 1, "a")], fake.typed
 
 
 def test_nothing_runnable_touches_nothing():
     fake = FakeITerm(tabs=3)
     install(fake)
-    assert restore.execute(actions((1, "a", "skip me")), 1) == 0
+    assert restore.execute(actions((1, "a", "skip me")), "w1") == 0
     assert fake.typed == [] and fake.created == 0
+
+
+def test_typing_survives_the_window_index_moving():
+    """iTerm's window index is its front-to-back position.
+
+    Focusing any window renumbers them, so an index captured while planning can
+    point at a different window by the time we type. Targeting by id makes the
+    renumber irrelevant; targeting by index would send one window's sessions
+    into another.
+    """
+    fake = FakeITerm(tabs=3, window=1, window_id="stable-id")
+    install(fake)
+    acts = actions((1, "cmd1", None), (2, "cmd2", None))
+    # The operator clicks another window: ours is now third from front.
+    fake.window = 3
+    ran = restore.execute(acts, "stable-id")
+    assert ran == 2
+    assert fake.typed == [("stable-id", 1, "cmd1"), ("stable-id", 2, "cmd2")], fake.typed
+
+
+def test_a_window_that_disappeared_types_nothing():
+    """A window closed after planning must receive nothing at all."""
+    fake = FakeITerm(tabs=3, window_id="still-here")
+    install(fake)
+    ran = restore.execute(actions((1, "cmd1", None), (2, "cmd2", None)), "gone")
+    assert ran == 0
+    assert fake.typed == [], f"typed into a vanished window: {fake.typed}"
+    assert fake.created == 0, "created tabs in a vanished window"
 
 
 if __name__ == "__main__":

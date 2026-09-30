@@ -24,18 +24,18 @@ SNAP_WINDOW = {
 
 def live(window=1):
     return [
-        {"window_index": window, "tab_index": 1, "pane_index": 1, "tty": "/dev/ttys001",
+        {"window_index": window, "window_id": f"w{window}", "tab_index": 1, "pane_index": 1, "tty": "/dev/ttys001",
          "title": "A", "kind": "claude", "busy": True},
-        {"window_index": window, "tab_index": 2, "pane_index": 1, "tty": "/dev/ttys002",
+        {"window_index": window, "window_id": f"w{window}", "tab_index": 2, "pane_index": 1, "tty": "/dev/ttys002",
          "title": "B", "kind": "zsh", "busy": False},
-        {"window_index": window, "tab_index": 3, "pane_index": 1, "tty": "/dev/ttys003",
+        {"window_index": window, "window_id": f"w{window}", "tab_index": 3, "pane_index": 1, "tty": "/dev/ttys003",
          "title": "C", "kind": "zsh", "busy": False},
-        {"window_index": window, "tab_index": 4, "pane_index": 1, "tty": "/dev/ttys004",
+        {"window_index": window, "window_id": f"w{window}", "tab_index": 4, "pane_index": 1, "tty": "/dev/ttys004",
          "title": "D", "kind": "zsh", "busy": False},
     ]
 
 
-def run(monkey_tty, force=False, target=1):
+def run(monkey_tty, force=False, target="w1"):
     restore.current_tty = lambda: monkey_tty  # type: ignore[assignment]
     return {a.tab_index: a for a in restore.plan(SNAP_WINDOW, live(), target, force)}
 
