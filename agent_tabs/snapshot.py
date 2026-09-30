@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +14,11 @@ from . import adapters, iterm, procs
 
 STATE_DIR = Path(os.environ.get("AGENT_TABS_HOME", Path.home() / ".agent-tabs"))
 LATEST = STATE_DIR / "snapshot.json"
+# The last snapshot captured before the most recent boot, pinned on the first
+# promotion after that boot. History alone cannot protect it: it keeps only the
+# last HISTORY_KEEP captures, and an idle iTerm after a reboot fills history
+# with empty captures within about half an hour.
+PRE_BOOT = STATE_DIR / "pre-boot.json"
 HISTORY_DIR = STATE_DIR / "history"
 HISTORY_KEEP = 60
 
@@ -78,6 +85,84 @@ def build() -> dict:
         "captured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "windows": ordered,
     }
+
+
+def boot_time() -> datetime | None:
+    """When the machine last booted, or None if it cannot be determined."""
+    try:
+        raw = subprocess.run(
+            ["sysctl", "-n", "kern.boottime"], capture_output=True, text=True, check=False
+        ).stdout
+    except OSError:
+        return None
+    match = re.search(r"sec = (\d+)", raw)
+    if not match:
+        return None
+    return datetime.fromtimestamp(int(match.group(1)), timezone.utc)
+
+
+def captured_at(snap: dict) -> datetime | None:
+    try:
+        when = datetime.fromisoformat(snap["captured_at"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
+def _pin_pre_boot(incoming: dict) -> None:
+    """Keep the pre-reboot snapshot before a post-reboot one replaces it.
+
+    Runs on promotion. The first promotion after a boot is the one that would
+    overwrite the pre-reboot fleet, so that is the moment to copy it aside. A
+    failure here must never block a capture.
+    """
+    booted = boot_time()
+    if booted is None or not LATEST.exists():
+        return
+    try:
+        current = json.loads(LATEST.read_text())
+    except (json.JSONDecodeError, OSError):
+        return
+    before, after = captured_at(current), captured_at(incoming)
+    if before is None or after is None:
+        return
+    if before < booted <= after:
+        # Record which boot this pin belongs to. A pre-boot.json left from an
+        # earlier reboot must never be offered as "the last one before the
+        # reboot" -- it would point a restore at an ancient fleet.
+        try:
+            _write_atomic(PRE_BOOT, {**current, "pinned_for_boot": booted.isoformat()})
+        except OSError:
+            pass
+
+
+def pre_boot_warning(snap: dict) -> str | None:
+    """Explain when the snapshot in use postdates a reboot and lost sessions.
+
+    After a reboot with no restored windows, starting even one session before
+    restoring lets that small capture replace the full one about a minute
+    later. The full one is pinned in pre-boot.json; say so rather than let a
+    restore quietly bring back the wrong fleet.
+    """
+    booted = boot_time()
+    taken = captured_at(snap)
+    if booted is None or taken is None or taken < booted or not PRE_BOOT.exists():
+        return None
+    try:
+        pinned = json.loads(PRE_BOOT.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    if pinned.get("pinned_for_boot") != booted.isoformat():
+        return None  # left over from an earlier reboot
+    now, before = agent_tab_count(snap), agent_tab_count(pinned)
+    if before <= now:
+        return None
+    return (
+        f"This snapshot was captured after the last reboot and holds {now} "
+        f"agent session(s). The last one before the reboot held {before}, "
+        f"captured {pinned.get('captured_at', '?')}. To restore that instead:\n"
+        f"  agent-tabs restore --all -f {PRE_BOOT}"
+    )
 
 
 def agent_tab_count(snap: dict) -> int:
@@ -218,6 +303,7 @@ def save(snap: dict) -> tuple[Path | None, Path]:
         if not persistent:
             return None, archive
 
+    _pin_pre_boot(snap)
     _write_atomic(LATEST, snap)
     return LATEST, archive
 
