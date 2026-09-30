@@ -292,12 +292,16 @@ def _assign(
     claims: dict[int, int] = {}
     for group in _groups(order, scores):
         contested = {idx for live in group for idx in scores[live]}
-        if len(contested) > EXACT_ASSIGNMENT_LIMIT:
+        # Both dimensions are capped. Snapshot candidates bound the state
+        # space; live windows bound the number of re-solves used to test each
+        # pairing for being forced. Capping only the first let ~30 windows
+        # sharing a generic title like "zsh" take ~10s -- measured, not guessed.
+        if len(contested) > EXACT_ASSIGNMENT_LIMIT or len(group) > EXACT_ASSIGNMENT_LIMIT:
             for live in group:
                 notes.append(
                     f"live window {live}: shares titles with too many other "
-                    f"windows ({len(contested)} candidates) to match confidently; "
-                    "restore it explicitly"
+                    f"windows ({len(group)} windows, {len(contested)} candidates) "
+                    "to match confidently; restore it explicitly"
                 )
             continue
         group_claims, ambiguous = _assign_group(sorted(group), scores)
