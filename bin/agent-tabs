@@ -250,11 +250,7 @@ def cmd_restore(args) -> int:
         return 0
 
     if target is None:
-        created = iterm.create_window(max(a.tab_index for a in runnable))
-        target = restore_mod.window_id_for_index(restore_mod.live_tabs(), created)
-        if target is None:
-            print("Could not identify the new window.", file=sys.stderr)
-            return 2
+        target = iterm.create_window(max(a.tab_index for a in runnable))
     ran = restore_mod.execute(actions, target, args.force)
     print(f"\nStarted {ran} tabs.")
     return 0

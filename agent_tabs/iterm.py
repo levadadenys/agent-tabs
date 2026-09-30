@@ -137,8 +137,14 @@ end tell
     _osascript(script)
 
 
-def create_window(tab_count: int) -> int:
-    """Open a window with `tab_count` tabs; returns its 1-based window index."""
+def create_window(tab_count: int) -> str:
+    """Open a window with `tab_count` tabs; returns its stable window id.
+
+    The id is captured from the window reference inside the same AppleScript
+    that creates it. Returning its front-to-back index instead -- and resolving
+    that back to an id afterwards -- left a window in which focusing anything
+    else would point the restore at a different window.
+    """
     if tab_count < 1:
         raise ValueError("tab_count must be at least 1")
     extra = tab_count - 1
@@ -148,16 +154,13 @@ tell application "iTerm2"
     repeat {extra} times
         tell win to create tab with default profile
     end repeat
-    set wi to 0
-    set found to 0
-    repeat with w in windows
-        set wi to wi + 1
-        if (id of w) is (id of win) then set found to wi
-    end repeat
-    return found
+    return (id of win)
 end tell
 '''
-    return int(_osascript(script).strip())
+    window_id = _osascript(script).strip()
+    if not window_id:
+        raise ITermError("iTerm created a window but did not report its id")
+    return window_id
 
 
 def create_tab(window_id: str) -> None:
