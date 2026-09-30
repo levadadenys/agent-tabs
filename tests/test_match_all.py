@@ -50,12 +50,18 @@ def test_pairing_survives_reordered_windows():
 
 
 def test_a_snapshot_window_is_claimed_only_once():
-    # Two live windows showing the same titles must not both be restored, or
-    # every session in that window would start twice.
+    """Never restore one snapshot window into two live windows.
+
+    Two live windows showing identical titles cannot both be restored, or
+    every session would start twice. Nor can either be picked: nothing
+    distinguishes the real one, so both are reported and left alone.
+    """
     s = snap(["a", "b"])
-    pairs, _, notes = restore.match_all(s, live(["a", "b"], ["a", "b"]))
-    assert len(pairs) == 1, f"claimed twice: {pairs}"
-    assert any("already being restored" in n for n in notes)
+    pairs, unmatched, notes = restore.match_all(s, live(["a", "b"], ["a", "b"]))
+    assert len(pairs) <= 1, f"claimed twice: {pairs}"
+    assert pairs == [], f"guessed between indistinguishable windows: {pairs}"
+    assert sum("fits equally well" in n for n in notes) == 2, notes
+    assert [w["window_index"] for w in unmatched] == [1]
 
 
 def test_unmatched_snapshot_windows_are_reported_not_created():
@@ -123,10 +129,14 @@ def test_a_window_falls_back_to_its_next_best():
 
 
 def test_a_window_with_no_remaining_option_is_reported():
-    s = snap(["a", "b"])
-    pairs, _, notes = restore.match_all(s, live(["a", "b"], ["a", "b"]))
-    assert len(pairs) == 1
-    assert any("already being restored elsewhere" in n for n in notes), notes
+    # A clearly weaker window whose only candidate went to a stronger one is
+    # reported as having nothing left, not silently dropped.
+    s = snap(["a", "b", "c"])
+    pairs, _, notes = restore.match_all(s, live(["a", "b", "c"], ["a"]))
+    assert [(w, m["window_index"]) for w, m in pairs] == [(1, 1)], pairs
+    assert any(
+        "live window 2" in n and "already being restored elsewhere" in n for n in notes
+    ), notes
 
 
 def test_assignment_restores_both_when_greedy_would_strand_one():
@@ -202,6 +212,45 @@ def test_grouping_keeps_independent_windows_apart():
         [1, 2, 3], {1: {10: 3, 11: 2}, 2: {10: 3}, 3: {20: 1}}
     )
     assert sorted(sorted(g) for g in groups) == [[1, 2], [3]], groups
+
+
+def test_a_global_tie_is_reported_not_guessed():
+    """Codex's case: no window is tied locally, yet the assignment is.
+
+    Each live window overlaps snapshot 1 by two titles and snapshot 2 by one,
+    so {1->1, 2->2} and {1->2, 2->1} both total 3. Picking either would put a
+    snapshot window's sessions into a window the evidence cannot tell apart.
+    """
+    s = snap(["a", "b"], ["c"])
+    pairs, unmatched, notes = restore.match_all(
+        s, live(["a", "b", "c", "p"], ["a", "b", "c", "q"])
+    )
+    assert pairs == [], f"guessed a globally tied assignment: {pairs}"
+    assert sum("fits equally well" in n for n in notes) == 2, notes
+    assert sorted(w["window_index"] for w in unmatched) == [1, 2]
+
+
+def test_a_forced_pairing_survives_a_tie_elsewhere():
+    # A tie in one group must not cost an unambiguous window in another.
+    s = snap(["a", "b"], ["c"], ["solo1", "solo2"])
+    pairs, _, _ = restore.match_all(
+        s, live(["a", "b", "c", "p"], ["a", "b", "c", "q"], ["solo1", "solo2"])
+    )
+    assert [(w, m["window_index"]) for w, m in pairs] == [(3, 3)], pairs
+
+
+def test_a_partly_forced_group_keeps_its_forced_pairs():
+    """Ambiguity is per window, not per group.
+
+    Live 3 is certainly snapshot 3; lives 1 and 2 tie for snapshots 1 and 2.
+    All three share one group through title 'z', yet live 3 must still be
+    restored.
+    """
+    s = snap(["a", "b"], ["c"], ["x", "y", "w", "z"])
+    pairs, _, notes = restore.match_all(
+        s, live(["a", "b", "c", "z"], ["a", "b", "c", "z"], ["x", "y", "w", "z"])
+    )
+    assert [(w, m["window_index"]) for w, m in pairs] == [(3, 3)], (pairs, notes)
 
 
 def test_no_live_windows_pairs_nothing():
