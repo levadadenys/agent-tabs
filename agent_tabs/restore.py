@@ -367,6 +367,11 @@ def match_all(
     return pairs, unmatched, notes
 
 
+# Marks a `running` entry that is not live yet but will be started by this
+# restore, so a dry run can tell "already running" from "planned above".
+PLANNED = "planned: "
+
+
 def running_sessions() -> dict[str, str]:
     """Agent sessions live right now, by session id -> where they are running.
 
@@ -397,8 +402,16 @@ def plan(
     `force` lets restore type into a tab that is busy. It does not override
     `running`: starting a session that is already running elsewhere is never
     wanted, whatever the tab it would land in.
+
+    `running` is also updated in place: each session this plan will start is
+    reserved in it. Pass the SAME dict to every plan in one restore, so a
+    session that appears in two tabs or two windows of the snapshot starts
+    once, not once per appearance.
     """
-    running = running or {}
+    if running is None:
+        # Not `running or {}`: an empty caller dict must stay the caller's, or
+        # reservations made here would be lost before the next window's plan.
+        running = {}
     own_tty = current_tty()
     busy: dict[int, dict] = {}
     if target_window is not None:
@@ -420,11 +433,20 @@ def plan(
         if not action.command:
             action.skip_reason = "nothing recorded"
         elif session and session in running:
-            action.skip_reason = f"session already running in {running[session]}"
+            where = running[session]
+            action.skip_reason = (
+                f"same session as {where[len(PLANNED):]}, started once"
+                if where.startswith(PLANNED)
+                else f"session already running in {where}"
+            )
         elif existing and procs.normalise_tty(existing["tty"]) == own_tty:
             action.skip_reason = "this is the tab you are running from"
         elif existing and existing.get("busy") and not force:
             action.skip_reason = f"already running {existing['kind']} (use --force)"
+        if action.will_run and session:
+            running[session] = (
+                f"{PLANNED}tab {index} of snapshot window {window.get('window_index', '?')}"
+            )
         actions.append(action)
     return actions
 
