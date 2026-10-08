@@ -118,6 +118,14 @@ def cmd_list(args) -> int:
     return 0
 
 
+def _window_list(indexes) -> str:
+    """'snapshot window 2', 'snapshot windows 1 and 3', 'snapshot windows 1, 2 and 4'."""
+    items = [str(i) for i in indexes]
+    if len(items) == 1:
+        return f"snapshot window {items[0]}"
+    return f"snapshot windows {', '.join(items[:-1])} and {items[-1]}"
+
+
 def _warn_if_replaced(snap: dict) -> None:
     """Flag a post-reboot snapshot that lost sessions. On stderr, so piped
     output such as `list --commands` stays clean."""
@@ -151,7 +159,7 @@ def cmd_restore_all(args, snap, live) -> int:
     iTerm did not bring the windows back.
     """
     launcher = restore_mod.current_window_index(live)
-    pairs, create, reported, notes = restore_mod.decide_restore_all(
+    pairs, create, reported, notes, would_create = restore_mod.decide_restore_all(
         snap, live, launcher, args.create_missing
     )
     running = restore_mod.running_sessions()
@@ -169,11 +177,14 @@ def cmd_restore_all(args, snap, live) -> int:
                 f"agent-tabs restore {window['window_index']} --new-window --go",
                 file=sys.stderr,
             )
-        print(
-            "\nTo rebuild all of them in new windows at once:"
-            "\n  agent-tabs restore --all --create-missing --go",
-            file=sys.stderr,
-        )
+        # Name exactly what --create-missing would rebuild: it refuses windows a
+        # live window might be, so "rebuild all of them" would be a false promise.
+        if would_create and not args.create_missing:
+            print(
+                f"\nTo rebuild {_window_list(would_create)} in new windows at once:"
+                "\n  agent-tabs restore --all --create-missing --go",
+                file=sys.stderr,
+            )
         return 2
 
     planned = []
@@ -214,8 +225,9 @@ def cmd_restore_all(args, snap, live) -> int:
                 f"window matched — rebuild it with:  agent-tabs restore "
                 f"{window['window_index']} --new-window --go"
             )
-        if reported and not args.create_missing:
-            print("  (or add --create-missing to rebuild every unmatched window)")
+        rebuildable = [w["window_index"] for w in reported if w["window_index"] in would_create]
+        if rebuildable and not args.create_missing:
+            print(f"  (add --create-missing to rebuild {_window_list(rebuildable)})")
 
     if not args.go:
         print(f"\nDry run. {total} tabs would start across {len(planned)} windows.")
