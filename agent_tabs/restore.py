@@ -95,7 +95,15 @@ def window_id_for_index(tabs: list[dict], window_index: int) -> str | None:
 # A tab titled only with a shell name says nothing about which window it was
 # in: every idle tab looks like that. Counting it let a freshly opened window
 # pair with whichever snapshot window happened to have an idle shell tab.
-GENERIC_TITLES = frozenset({"zsh", "-zsh", "bash", "-bash", "sh", "-sh", "fish", "-fish", "login"})
+#
+# Derived from procs' canonical shell and login names, never copied: a copy
+# drifted immediately and missed tcsh, csh, ksh and dash. A login shell's
+# title carries a leading '-'.
+GENERIC_TITLES = frozenset(
+    name
+    for base in procs.SHELL_NAMES | procs.LOGIN_NAMES
+    for name in (base, f"-{base}")
+)
 
 
 def identifying_titles(tabs) -> set[str]:
@@ -428,8 +436,9 @@ def creatable(
         if index in contested:
             who = ", ".join(f"live window {w}" for w in contested[index])
             refused[index] = (
-                f"snapshot window {index}: not rebuilt, {who} might be it; "
-                f"restore it explicitly with  agent-tabs restore {index}"
+                f"snapshot window {index}: not rebuilt, {who} might be it. "
+                f"If it is, run  agent-tabs restore {index}  from a new tab in "
+                f"that window; if not,  agent-tabs restore {index} --new-window --go"
             )
         else:
             create.append(window)
@@ -438,12 +447,14 @@ def creatable(
 
 def decide_restore_all(
     snap: dict, live: list[dict], launcher: int | None, create_missing: bool
-) -> tuple[list[tuple[int, dict]], list[dict], list[dict], list[str]]:
+) -> tuple[list[tuple[int, dict]], list[dict], list[dict], list[str], list[int]]:
     """Everything `restore --all` decides, before anything is printed or typed.
 
-    Returns (pairs, create, reported, notes): live windows to fill, snapshot
-    windows to rebuild in new windows, snapshot windows to only report, and
-    the reasons for what was left alone.
+    Returns (pairs, create, reported, notes, would_create): live windows to
+    fill, snapshot windows to rebuild in new windows, snapshot windows to only
+    report, the reasons for what was left alone, and which snapshot windows
+    --create-missing rebuilds -- computed whether or not it was passed, so a
+    hint can name exactly what it would do instead of promising "all".
 
     The launcher -- the window this runs in -- is never paired. One of its tabs
     is the one being typed in, which restore never types into, so pairing it
@@ -467,15 +478,15 @@ def decide_restore_all(
             )
         )
 
-    create: list[dict] = []
-    refused: dict[int, str] = {}
-    if create_missing:
-        create, refused = creatable(snap, candidates, pairs, unmatched)
-        notes += list(refused.values())
+    would, would_refuse = creatable(snap, candidates, pairs, unmatched)
+    would_create = [w["window_index"] for w in would]
+    create: list[dict] = would if create_missing else []
+    refused: dict[int, str] = would_refuse if create_missing else {}
+    notes += list(refused.values())
     reported = [
         w for w in unmatched if w not in create and w["window_index"] not in refused
     ]
-    return pairs, create, reported, notes
+    return pairs, create, reported, notes, would_create
 
 
 def plan(
