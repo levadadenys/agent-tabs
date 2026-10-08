@@ -54,6 +54,8 @@ seeing the plan.
 
 - `SKIP (session already running in …)` — that session is live elsewhere;
   restoring it would start a duplicate. Expected, nothing to do.
+- `SKIP (same session as tab N of snapshot window W, started once)` — the
+  snapshot lists that session twice; it is restored once.
 - `SKIP (already running …)` — the target tab is busy. `--force` types into it
   anyway; it never starts a duplicate session.
 - `Not restored:` — windows it declined to guess about (ambiguous, too many

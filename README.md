@@ -141,9 +141,10 @@ Restore types into live shells, so it is conservative by default:
   `psql` or an `ssh` session, where typed text would run on the remote host.
   Override with `--force`. It also never types into the tab it runs from.
   Liveness is checked again immediately before typing, not only when planning.
-- **Never starts a session that is already running** anywhere, in any window.
-  `--force` does not override this: it is about busy tabs, and a duplicate
-  session is never wanted.
+- **Never starts a session that is already running** anywhere, in any window
+  — nor twice in one restore, if the snapshot lists it in two tabs. `--force`
+  does not override this: it is about busy tabs, and a duplicate session is
+  never wanted.
 - **Never replays shell syntax.** A recorded command line containing it is
   reported and downgraded to a bare `cd`, because argv is data any local process
   controls and restore can run unattended.
@@ -217,7 +218,8 @@ with the command for each: ambiguous, too many windows sharing titles, or no
 live window matched. `--create-missing` rebuilds the last kind.
 
 **A tab says "session already running in …".** It is: restoring it would start a
-duplicate. Nothing to do.
+duplicate. Nothing to do. "Same session as tab N of snapshot window W, started
+once" means the snapshot listed that session twice; it is restored once.
 
 ## Config
 
