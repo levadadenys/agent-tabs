@@ -115,10 +115,16 @@ an issue.
 - Never create a window unless asked (`--new-window`, `--create-missing`), and
   never rebuild a snapshot window that an unpaired live window might be.
 - Never pair the window `restore --all` runs in: one of its tabs is the one
-  being typed in, so it could only ever be part-restored.
+  being typed in, so it could only ever be part-restored. It still competes in
+  the matching, and only its own pairing is dropped: excluded outright, its
+  snapshot window went to any window sharing a single title with it.
 - A title that is only a shell name is not evidence of which window it was.
 - Never let a capture with no agent sessions overwrite a good snapshot, nor a
   collapsed one until the drop has persisted.
 - Keep the pre-reboot snapshot recoverable: `pre-boot.json` is pinned on the
-  first promotion after each boot, tagged with that boot, falling back to the
-  fullest pre-boot capture in history when `snapshot.json` cannot be used.
+  first promotion after each boot, tagged with that boot: the fuller of
+  `snapshot.json` (if it predates the boot) and the fullest pre-boot capture
+  in history.
+- Re-check running sessions before creating a window and before adding tabs,
+  not only before typing: a session started since the plan must not leave a
+  blank window or tab behind.

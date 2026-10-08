@@ -62,8 +62,8 @@ seeing the plan.
 - `SKIP (already running …)` — the target tab is busy. `--force` types into it
   anyway; it never starts a duplicate session.
 - `Not restored:` — windows it declined to guess about (ambiguous, too many
-  windows sharing titles, no live match, or the window it ran from), each with
-  the command that restores it. Rerunning from a new window is safe: anything
+  windows sharing titles, no live match, one a live window might be, or the
+  window it ran from), each with the command that restores it. Rerunning from a new window is safe: anything
   already running is skipped.
 
 For a single window, run from inside it: `agent-tabs restore` (auto-matched) or

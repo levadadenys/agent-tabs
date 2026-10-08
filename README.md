@@ -165,20 +165,24 @@ A wrong pairing types one window's sessions into another, so:
   assignment that maximises total overlap — a snapshot window goes to at most
   one live window. A title that is only a shell name (`-zsh`, `bash`, …) does
   not count: every idle tab looks like that;
-- the window `--all` runs in is never paired, since one of its tabs is the one
-  being typed in and could never be filled. Run it from a new window. If you
-  run it from inside a restored window instead, that window is reported, and
-  running it again from a new window restores it — anything already running is
-  skipped;
+- the window `--all` runs in is never filled, since one of its tabs is the one
+  being typed in. Run it from a new window. If you run it from inside a
+  restored window instead, that window still takes part in the matching — so
+  no other window can claim its snapshot window — and is then reported;
+  running it again from a new window restores it, and anything already running
+  is skipped;
 - a pairing is used only when it is **forced**: the same in every best
   assignment. If the evidence fits two pairings equally well, those windows are
   reported, never guessed;
-- a group of more than 12 windows all sharing titles is reported rather than
+- a group of windows tangled by shared titles — more than 12 live windows, or
+  more than 12 snapshot windows they could be — is reported rather than
   matched;
 - windows are targeted by iTerm's stable window id, not their position, which
   changes whenever you focus a window.
 
-Anything not paired is listed with the command that restores it.
+Anything not paired is listed with the command that restores it. A snapshot
+window that an unpaired live window might be is listed as such, with the
+command for either case, rather than as unmatched.
 
 ## Snapshots and reboots
 
@@ -197,11 +201,12 @@ snapshot matters most is a shutdown, when tabs die one at a time:
   Genuinely closing most of your sessions is accepted after that minute; closing
   a tab or two is promoted immediately.
 
-**Across a reboot**, the first promotion after boot copies the outgoing snapshot
-to `pre-boot.json`. If `snapshot.json` cannot be read at that moment, the
-fullest capture from before the reboot still in history is pinned instead — not
-simply the newest, since the last captures before a reboot are half-dead ones
-from the shutdown. That matters if iTerm restored nothing and you started a
+**Across a reboot**, the first promotion after boot pins the pre-reboot fleet
+in `pre-boot.json`: the fuller of the outgoing `snapshot.json` and the fullest
+capture from before the reboot still in history. Not simply the newest: the
+last captures before a reboot are half-dead ones from the shutdown, and one
+can reach `snapshot.json` if the shutdown drags on. Not history alone either:
+after a long idle spell it may no longer hold the fleet. That matters if iTerm restored nothing and you started a
 session before restoring: that small capture replaces `snapshot.json` about a
 minute later, and history rotates the full one out within half an hour. When
 that has happened, `list` and `restore` say so and print the command to restore
@@ -228,15 +233,19 @@ snapshot window this is. Run `agent-tabs list` and pass the number, or use
 **"Not running inside an iTerm tab."** Plain `restore` fills the window it runs
 in. Run it from an iTerm tab, or use `--all` or `--new-window`.
 
-**"The one you are in was not paired."** `--all` never fills the window it runs
-from. Open a new window (⌘N) and run it again; what is already running is
+**"The one you are in is snapshot window N" / "was not paired."** `--all` never
+fills the window it runs from. Open a new window (⌘N) and run it again; what is already running is
 skipped. With `--create-missing`, that window is rebuilt in a new window
 instead.
 
 **A window was not restored.** `restore --all` lists why under *Not restored*,
 with the command for each: ambiguous, too many windows sharing titles, no live
-window matched, or it is the window you ran it from. `--create-missing` rebuilds
-the unmatched ones, but not one that an unpaired live window might be.
+window matched, a live window might be it, or it is the window you ran it
+from. `--create-missing` rebuilds the unmatched ones, but not one that an
+unpaired live window might be.
+
+**"Cannot take the restore lock."** `~/.agent-tabs` (or `AGENT_TABS_HOME`) is not
+writable. Nothing was typed; fix the permissions and run it again.
 
 **A tab says "session already running in …".** It is: restoring it would start a
 duplicate. Nothing to do. "Same session as tab N of snapshot window W, started
@@ -267,6 +276,10 @@ relocates `~/.agent-tabs`, mainly for testing.
   title counts, so two unrelated windows that happen to share one distinctive
   title can still pair when nothing else competes. The dry run shows every
   pairing before anything is typed.
+- Only agent sessions with an id are deduplicated. An ssh tab or another
+  recorded command has no session to check, so restoring the same snapshot
+  twice into new windows — two `--create-missing` runs whose first windows no
+  longer match — runs it twice. Read the dry run.
 - Tab positions are read when planning. Reordering tabs *within* a window
   between the dry run and `--go` could put a command in the wrong tab of the
   right window.
