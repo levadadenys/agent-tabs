@@ -12,7 +12,7 @@ afterwards.
 
 ## After a crash or reboot
 
-Open any iTerm tab and check what was recorded:
+Open a **new** iTerm window (⌘N) and check what was recorded:
 
 ```bash
 agent-tabs list
@@ -33,6 +33,8 @@ agent-tabs restore --all --go   # start the sessions
 ```
 
 Each live window is paired with the snapshot window it came from, by tab title.
+Run it from a new window: the window you run it from is never paired, because
+one of its tabs is the one you are typing in.
 
 **iTerm opened no windows**, or only some:
 
@@ -42,7 +44,9 @@ agent-tabs restore --all --create-missing --go   # rebuild them
 ```
 
 `--create-missing` rebuilds, in a new window, every snapshot window that no live
-window matched. Windows that did come back are still restored in place.
+window matched. Windows that did come back are still restored in place. A
+snapshot window that some unpaired live window *might* be is reported rather
+than rebuilt — restore it explicitly once you have checked.
 
 **Restore before starting new sessions.** Everything is a dry run until you add
 `--go`, and a session that is already running anywhere is never started twice,
@@ -107,8 +111,8 @@ agent-tabs restore ... -f <file>          # restore from a specific snapshot fil
 ```
 
 `restore` without `--all` or `--new-window` fills the iTerm window it is run
-from, so run it from inside that window. `--all` and `--new-window` can be run
-from any tab.
+from, so run it from inside that window. Run `--all` from a new window (⌘N): the
+window it runs in is never paired.
 
 ## What gets restored
 
@@ -157,7 +161,13 @@ A wrong pairing types one window's sessions into another, so:
 
 - windows are matched by how many tab titles they share, as a one-to-one
   assignment that maximises total overlap — a snapshot window goes to at most
-  one live window;
+  one live window. A title that is only a shell name (`-zsh`, `bash`, …) does
+  not count: every idle tab looks like that;
+- the window `--all` runs in is never paired, since one of its tabs is the one
+  being typed in and could never be filled. Run it from a new window. If you
+  run it from inside a restored window instead, that window is reported, and
+  running it again from a new window restores it — anything already running is
+  skipped;
 - a pairing is used only when it is **forced**: the same in every best
   assignment. If the evidence fits two pairings equally well, those windows are
   reported, never guessed;
@@ -213,9 +223,15 @@ snapshot window this is. Run `agent-tabs list` and pass the number, or use
 **"Not running inside an iTerm tab."** Plain `restore` fills the window it runs
 in. Run it from an iTerm tab, or use `--all` or `--new-window`.
 
+**"The one you are in was not paired."** `--all` never fills the window it runs
+from. Open a new window (⌘N) and run it again; what is already running is
+skipped. With `--create-missing`, that window is rebuilt in a new window
+instead.
+
 **A window was not restored.** `restore --all` lists why under *Not restored*,
-with the command for each: ambiguous, too many windows sharing titles, or no
-live window matched. `--create-missing` rebuilds the last kind.
+with the command for each: ambiguous, too many windows sharing titles, no live
+window matched, or it is the window you ran it from. `--create-missing` rebuilds
+the unmatched ones, but not one that an unpaired live window might be.
 
 **A tab says "session already running in …".** It is: restoring it would start a
 duplicate. Nothing to do. "Same session as tab N of snapshot window W, started
@@ -242,8 +258,10 @@ relocates `~/.agent-tabs`, mainly for testing.
   the manual notes in `skills/resume-tabs/SKILL.md`.
 - A deleted git worktree must be recreated at its old path before a session that
   ran inside it can be resumed.
-- Pairing is by tab title, so one shared generic title (say `zsh`) is enough to
-  pair two windows when nothing else competes.
+- Pairing is by tab title. Shell-name titles are ignored, but any other shared
+  title counts, so two unrelated windows that happen to share one distinctive
+  title can still pair when nothing else competes. The dry run shows every
+  pairing before anything is typed.
 - Tab positions are read when planning. Reordering tabs *within* a window
   between the dry run and `--go` could put a command in the wrong tab of the
   right window.

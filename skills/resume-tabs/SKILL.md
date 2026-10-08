@@ -32,7 +32,9 @@ seeing the plan.
    `~/.agent-tabs/pre-boot.json`. Use the command it prints, which adds
    `-f ~/.agent-tabs/pre-boot.json`.
 
-2. Dry-run the whole fleet, from any iTerm tab:
+2. Open a **new** iTerm window (⌘N) and dry-run the whole fleet from it — the
+   window `--all` runs in is never paired, because one of its tabs is the one
+   being typed in:
 
    ```bash
    agent-tabs restore --all                    # iTerm restored the windows
@@ -41,8 +43,9 @@ seeing the plan.
 
    `--all` pairs each live window with the snapshot window it came from, by tab
    title — iTerm restores titles when *Reopen windows when logging back in* was
-   ticked at shutdown. `--create-missing` also rebuilds, in new windows, the
-   snapshot windows nothing matched.
+   ticked at shutdown. Titles that are only a shell name (`-zsh`) do not count.
+   `--create-missing` also rebuilds, in new windows, the snapshot windows
+   nothing matched — but not one that an unpaired live window might be.
 
 3. Read the plan, then execute:
 
@@ -59,8 +62,9 @@ seeing the plan.
 - `SKIP (already running …)` — the target tab is busy. `--force` types into it
   anyway; it never starts a duplicate session.
 - `Not restored:` — windows it declined to guess about (ambiguous, too many
-  windows sharing titles, or no live match), each with the command that
-  restores it.
+  windows sharing titles, no live match, or the window it ran from), each with
+  the command that restores it. Rerunning from a new window is safe: anything
+  already running is skipped.
 
 For a single window, run from inside it: `agent-tabs restore` (auto-matched) or
 `agent-tabs restore <n>`. To rebuild one snapshot window from scratch:

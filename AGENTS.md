@@ -111,7 +111,11 @@ an issue.
   the same in every optimal assignment. Report ties; never guess.
   `tests/test_match_all_oracle.py` checks this against a brute force; keep it
   passing.
-- Never create a window unless asked (`--new-window`, `--create-missing`).
+- Never create a window unless asked (`--new-window`, `--create-missing`), and
+  never rebuild a snapshot window that an unpaired live window might be.
+- Never pair the window `restore --all` runs in: one of its tabs is the one
+  being typed in, so it could only ever be part-restored.
+- A title that is only a shell name is not evidence of which window it was.
 - Never let a capture with no agent sessions overwrite a good snapshot, nor a
   collapsed one until the drop has persisted.
 - Keep the pre-reboot snapshot recoverable: `pre-boot.json` is pinned on the
