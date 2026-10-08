@@ -80,8 +80,8 @@ def test_a_live_window_matching_nothing_is_noted():
 
 def test_an_ambiguous_window_is_skipped_not_guessed():
     # Two snapshot windows fit equally well; restoring either could be wrong.
-    s = snap(["zsh"], ["zsh"])
-    pairs, unmatched, notes = restore.match_all(s, live(["zsh"]))
+    s = snap(["notes"], ["notes"])
+    pairs, unmatched, notes = restore.match_all(s, live(["notes"]))
     assert pairs == []
     assert any("equally well" in n for n in notes)
     assert len(unmatched) == 2
@@ -271,6 +271,62 @@ def test_a_lone_local_tie_is_still_reported():
     assert pairs == [], pairs
     assert any("fits equally well" in n for n in notes), notes
     assert len(unmatched) == 2
+
+
+def test_a_shell_name_alone_is_not_evidence():
+    """An idle tab titled just '-zsh' identifies no window.
+
+    Counting it paired a freshly opened window with whichever snapshot window
+    happened to have an idle shell tab, and typed that window's sessions into
+    the wrong place.
+    """
+    s = snap(["web", "-zsh"], ["api"])
+    pairs, unmatched, notes = restore.match_all(s, live(["-zsh"]))
+    assert pairs == [], f"paired on a shell name: {pairs}"
+    assert any("no snapshot window matches" in n for n in notes), notes
+
+
+def test_shell_names_do_not_add_to_a_real_match():
+    # Both live windows share '-zsh' with both snapshots; only real titles decide.
+    s = snap(["web", "-zsh"], ["api", "-zsh"])
+    pairs, _, _ = restore.match_all(s, live(["api", "-zsh"], ["web", "-zsh", "bash"]))
+    assert sorted((w, m["window_index"]) for w, m in pairs) == [(1, 2), (2, 1)], pairs
+
+
+def test_creatable_skips_windows_an_unpaired_window_might_be():
+    """Copilot: --create-missing must not rebuild a window left ambiguous.
+
+    Live 1 could be snapshot 1 or 2 (tied on 'notes'), so neither is rebuilt;
+    snapshot 3 resembles nothing, so it is.
+    """
+    s = snap(["notes", "a"], ["notes", "b"], ["solo"])
+    l = live(["notes"])
+    pairs, unmatched, _ = restore.match_all(s, l)
+    create, refused = restore.creatable(s, l, pairs, unmatched)
+    assert [w["window_index"] for w in create] == [3], create
+    assert sorted(refused) == [1, 2], refused
+    assert all("not rebuilt" in n for n in refused.values()), refused
+
+
+def test_creatable_ignores_stray_overlap_from_a_paired_window():
+    # Live 1 is clearly snapshot 1; that it also shares 'x' with snapshot 2
+    # says nothing about snapshot 2, which iTerm simply did not bring back.
+    s = snap(["a", "b", "c", "x"], ["x", "y"])
+    l = live(["a", "b", "c", "x"])
+    pairs, unmatched, _ = restore.match_all(s, l)
+    assert [(w, m["window_index"]) for w, m in pairs] == [(1, 1)]
+    create, refused = restore.creatable(s, l, pairs, unmatched)
+    assert [w["window_index"] for w in create] == [2], (create, refused)
+
+
+def test_after_a_reboot_with_no_windows_everything_is_creatable():
+    """The scenario --create-missing exists for: only the launcher window is
+    open, it is excluded by the caller, so every snapshot window is rebuilt."""
+    s = snap(["web", "-zsh"], ["api", "-zsh"], ["notes"])
+    pairs, unmatched, _ = restore.match_all(s, [])
+    create, refused = restore.creatable(s, [], pairs, unmatched)
+    assert [w["window_index"] for w in create] == [1, 2, 3], create
+    assert refused == {}
 
 
 def test_no_live_windows_pairs_nothing():

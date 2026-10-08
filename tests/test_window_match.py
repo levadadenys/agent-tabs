@@ -42,7 +42,7 @@ def test_a_tie_is_refused_rather_than_guessed():
     # Two windows of generically-titled idle shells match equally well; picking
     # the first silently would replay the wrong window.
     try:
-        restore.match_window(snap(["zsh"], ["zsh"]), live("zsh"), 1)
+        restore.match_window(snap(["notes"], ["notes"]), live("notes"), 1)
     except restore.Ambiguous as exc:
         assert "window 1" in str(exc) and "window 2" in str(exc)
     else:
