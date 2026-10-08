@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import iterm, restore  # noqa: E402
+from agent_tabs import iterm, restore, snapshot as snap_mod  # noqa: E402
 from runner import run  # noqa: E402
 
 
@@ -41,7 +41,10 @@ class FakeITerm:
         self.tabs += 1
 
 
-def install(fake, busy_tabs=(), own_tty=None):
+def install(fake, busy_tabs=(), own_tty=None, running=None):
+    # execute() re-checks running sessions before typing; stub it so these
+    # tests never reach the real ps / lsof / AppleScript.
+    restore.running_sessions = lambda: dict(running or {})  # type: ignore[assignment]
     iterm.enumerate_tabs = fake.enumerate_tabs          # type: ignore[assignment]
     iterm.run_in_tab = fake.run_in_tab                  # type: ignore[assignment]
     iterm.create_tab = fake.create_tab                  # type: ignore[assignment]
@@ -145,6 +148,47 @@ def test_a_window_that_disappeared_types_nothing():
     assert ran == 0
     assert fake.typed == [], f"typed into a vanished window: {fake.typed}"
     assert fake.created == 0, "created tabs in a vanished window"
+
+
+def test_a_session_started_after_planning_is_not_started_again():
+    """Copilot round 4: the plan's duplicate check is a snapshot. A session
+    resumed by hand -- or by another restore -- between planning and typing
+    must not be started a second time."""
+    fake = FakeITerm(tabs=3)
+    install(fake, running={"sess-2": "live window 9 tab 1"})
+    acts = [
+        restore.Action(1, "t1", "claude", "claude --resume sess-1", None, "sess-1"),
+        restore.Action(2, "t2", "claude", "claude --resume sess-2", None, "sess-2"),
+    ]
+    ran = restore.execute(acts, "w1")
+    assert ran == 1
+    assert fake.typed == [("w1", 1, "claude --resume sess-1")], fake.typed
+
+
+def test_force_does_not_override_the_execute_time_check():
+    fake = FakeITerm(tabs=3)
+    install(fake, running={"sess-1": "live window 9 tab 1"})
+    acts = [restore.Action(1, "t1", "claude", "claude --resume sess-1", None, "sess-1")]
+    assert restore.execute(acts, "w1", force=True) == 0
+    assert fake.typed == []
+
+
+def test_two_restores_cannot_run_at_once():
+    import os, tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        original = snap_mod.STATE_DIR
+        snap_mod.STATE_DIR = Path(tmp)
+        try:
+            with restore.restore_lock():
+                try:
+                    with restore.restore_lock():
+                        raise AssertionError("a second restore acquired the lock")
+                except restore.RestoreInProgress as exc:
+                    assert "Another" in str(exc)
+            with restore.restore_lock():
+                pass  # released once the first finished
+        finally:
+            snap_mod.STATE_DIR = original
 
 
 if __name__ == "__main__":

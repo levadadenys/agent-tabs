@@ -116,8 +116,9 @@ def test_a_pin_from_an_earlier_reboot_is_never_offered():
     """A pre-boot.json can outlive its boot.
 
     Normally the first promotion after each boot re-pins it. When that pin
-    fails -- here snapshot.json is unreadable at that moment -- the file left
-    from an earlier reboot survives next to a post-reboot snapshot. It must not
+    fails -- here snapshot.json is unreadable and history holds nothing from
+    before this boot -- the file left from an earlier reboot survives next to
+    a post-reboot snapshot. It must not
     be offered as "the last one before the reboot": it would send a restore
     back to a fleet from days ago.
     """
@@ -129,7 +130,9 @@ def test_a_pin_from_an_earlier_reboot_is_never_offered():
         assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20, "setup: an old pin exists"
 
         m.boot_time = (lambda: BOOT)          # the machine reboots again
-        m.LATEST.write_text("{unreadable")    # so this boot's pin cannot happen
+        m.LATEST.write_text("{unreadable")    # so this boot's pin cannot happen...
+        for archive in m.HISTORY_DIR.glob("*.json"):  # ...not even from history
+            archive.unlink()
         latest, _ = m.save(snap(20, after(1)))
         assert latest is not None, "setup: the post-boot capture should promote"
         assert m.load(m.PRE_BOOT).get("pinned_for_boot") != BOOT.isoformat(), (
@@ -143,6 +146,54 @@ def test_a_pin_from_an_earlier_reboot_is_never_offered():
         assert m.pre_boot_warning(m.load()) is None, (
             "offered a pin left over from an earlier reboot"
         )
+
+
+def test_an_unreadable_snapshot_is_pinned_from_history_instead():
+    """Copilot round 4: an unreadable snapshot.json skipped the pin, then the
+    post-reboot capture replaced it, and the pre-reboot fleet -- still readable
+    in history -- rotated out within half an hour."""
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp))
+        m.save(snap(20, before(5)))
+        m.LATEST.write_text("{unreadable")
+        m.save(snap(20, after(1)))
+        assert m.PRE_BOOT.exists(), "the pre-reboot fleet was not pinned"
+        pinned = m.load(m.PRE_BOOT)
+        assert m.agent_tab_count(pinned) == 20
+        assert pinned["pinned_for_boot"] == BOOT.isoformat()
+
+
+def test_the_fallback_pins_the_full_fleet_not_the_dying_shutdown():
+    # The last captures before a reboot are half-dead: archived, never
+    # promoted. The newest pre-boot archive would pin 3 sessions instead of 20.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp))
+        m.save(snap(20, before(10)))
+        m.save(snap(8, before(2)))          # shutdown in progress
+        m.save(snap(3, before(1)))          # nearly gone
+        m.LATEST.write_text("{unreadable")
+        m.save(snap(20, after(1)))
+        assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20, "pinned a dying capture"
+
+
+def test_a_missed_pin_is_made_on_a_later_promotion():
+    # If the first post-boot pin could not happen, the next promotion tries
+    # again rather than giving up for the whole boot.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp))
+        m.save(snap(20, before(5)))
+        real = m._write_atomic
+        def flaky(path, data):
+            if path == m.PRE_BOOT:
+                raise OSError("disk full")
+            return real(path, data)
+        m._write_atomic = flaky
+        m.save(snap(20, after(1)))          # the pin fails
+        m._write_atomic = real
+        assert not m.PRE_BOOT.exists()
+        m.save(snap(21, after(2)))          # snapshot.json is post-boot now
+        assert m.PRE_BOOT.exists(), "a missed pin was never retried"
+        assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20
 
 
 def test_an_unknown_boot_time_is_harmless():

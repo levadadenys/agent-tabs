@@ -14,6 +14,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agent_tabs import iterm, restore, snapshot as snap_mod  # noqa: E402
 from runner import run  # noqa: E402
 
+# Captured before any test stubs it: install() replaces restore.running_sessions
+# for the tests that drive execute(), and a later test of the real function must
+# not end up exercising the stub instead.
+REAL_RUNNING_SESSIONS = restore.running_sessions
+
 WINDOW = {
     "window_index": 1,
     "tabs": [
@@ -67,7 +72,7 @@ def test_running_sessions_reads_agents_from_the_live_capture():
     original = snap_mod.build
     snap_mod.build = lambda: live_capture  # type: ignore[assignment]
     try:
-        running = restore.running_sessions()
+        running = REAL_RUNNING_SESSIONS()
     finally:
         snap_mod.build = original  # type: ignore[assignment]
     assert running == {"s1": "live window 2 tab 1"}, running
@@ -144,6 +149,7 @@ class NewWindowITerm:
 
 
 def install(fake):
+    restore.running_sessions = lambda: {}  # type: ignore[assignment]
     iterm.create_window = fake.create_window  # type: ignore[assignment]
     iterm.enumerate_tabs = fake.enumerate_tabs  # type: ignore[assignment]
     iterm.create_tab = fake.create_tab  # type: ignore[assignment]
