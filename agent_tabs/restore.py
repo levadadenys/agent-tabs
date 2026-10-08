@@ -459,34 +459,60 @@ def decide_restore_all(
     --create-missing rebuilds -- computed whether or not it was passed, so a
     hint can name exactly what it would do instead of promising "all".
 
-    The launcher -- the window this runs in -- is never paired. One of its tabs
-    is the one being typed in, which restore never types into, so pairing it
-    always left that snapshot window part-restored. It still takes part in the
-    matching, and only its own pairing is dropped afterwards: left out, its
-    snapshot window was up for grabs, and a window sharing a single title with
-    it took it -- typing the launcher's sessions into an unrelated window. The
-    launcher never blocks --create-missing.
+    The launcher -- the window this runs in -- is never paired: one of its
+    tabs is the one being typed in, so pairing it always left that snapshot
+    window part-restored. Whether it competes in the matching is itself a
+    guess, each way wrong in a different case. Left out, its snapshot window
+    is up for grabs, and a window sharing one title with it takes it. Let in
+    on one coincidental title, it resolves another window's tie for it. So a
+    pairing is kept only when it comes out the same both ways; a window whose
+    pairing depends on the launcher is reported, never guessed.
 
     A snapshot window some unpaired live window might be is reported with
     commands that work either way, with or without --create-missing: "no live
-    window matched" would be false, and its rebuild command a duplicate.
+    window matched" would be false, and its rebuild command a duplicate. The
+    launcher's own snapshot window is no exception: its claim may rest on a
+    single title too.
     """
-    pairs, unmatched, notes = match_all(snap, live)
-    mine: dict | None = None
-    if launcher is not None:
-        own = f"live window {launcher}:"
-        notes = [n for n in notes if not n.startswith(own)]
-        mine = next((w for index, w in pairs if index == launcher), None)
-        pairs = [(index, w) for index, w in pairs if index != launcher]
+    with_launcher, _, notes = match_all(snap, live)
+    candidates = [t for t in live if t["window_index"] != launcher]
+    without = {i: w["window_index"] for i, w in match_all(snap, candidates)[0]}
+
+    mine = next((w for i, w in with_launcher if i == launcher), None)
+    pairs = [
+        (i, w) for i, w in with_launcher
+        if i != launcher and without.get(i) == w["window_index"]
+    ]
+    paired = {i for i, _ in pairs}
+    unsettled = sorted(
+        ({i for i, _ in with_launcher} | set(without)) - paired - {launcher}
+    )
+    # Notes about the launcher, or about a window whose note is replaced below.
+    dropped = {f"live window {i}:" for i in [launcher, *unsettled] if i is not None}
+    notes = [n for n in notes if not any(n.startswith(d) for d in dropped)]
+    for i in unsettled:
+        notes.append(
+            f"live window {i}: which snapshot window it is depends on whether the "
+            "window you are in counts as evidence; restore it explicitly"
+        )
+
+    claimed = {w["window_index"] for _, w in pairs}
+    unmatched = [w for w in snap.get("windows", []) if w["window_index"] not in claimed]
+    would, refused = creatable(snap, candidates, pairs, unmatched)
+    would_create = [w["window_index"] for w in would]
+    create: list[dict] = would if create_missing else []
 
     if mine is not None:
+        index = mine["window_index"]
         notes.append(
-            f"live window {launcher} (the one you are in) is snapshot window "
-            f"{mine['window_index']}, but restore never types into the window it "
-            "runs from. "
+            f"live window {launcher} (the one you are in) looks like snapshot "
+            f"window {index}, but restore never types into the window it runs "
+            "from. "
             + (
                 "It is rebuilt in a new window below."
-                if create_missing
+                if create_missing and index in would_create
+                else f"See snapshot window {index} below."
+                if index in refused
                 else "Open a new window (Cmd-N) and run this again to restore it; "
                 "anything already running is skipped."
             )
@@ -504,18 +530,11 @@ def decide_restore_all(
             )
         )
 
-    candidates = [t for t in live if t["window_index"] != launcher]
-    would, refused = creatable(snap, candidates, pairs, unmatched)
-    if mine is not None:
-        # Not run through creatable: the launcher was the forced match, so no
-        # other window that overlaps it can be it.
-        would = sorted(would + [mine], key=lambda w: w["window_index"])
-    would_create = [w["window_index"] for w in would]
-    create: list[dict] = would if create_missing else []
     notes += list(refused.values())
+    # The launcher's window is explained by its own note, not as unmatched.
     reported = [
         w for w in unmatched
-        if w not in create and w["window_index"] not in refused
+        if w not in create and w["window_index"] not in refused and w is not mine
     ]
     return pairs, create, reported, notes, would_create
 
