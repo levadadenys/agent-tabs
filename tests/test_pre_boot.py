@@ -92,6 +92,9 @@ def test_the_exact_scenario_keeps_the_full_fleet_recoverable():
         warning = m.pre_boot_warning(m.load())
         assert warning and "held 20" in warning and "holds 1" in warning, warning
         assert f"-f {m.PRE_BOOT}" in warning, "the warning must give the command"
+        # The scenario is a reboot iTerm did not restore; there --all alone
+        # pairs nothing and creates nothing, so the command must create.
+        assert "--all --create-missing" in warning, warning
 
 
 def test_no_warning_when_the_snapshot_predates_the_boot():

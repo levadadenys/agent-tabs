@@ -73,6 +73,49 @@ def test_running_sessions_reads_agents_from_the_live_capture():
     assert running == {"s1": "live window 2 tab 1"}, running
 
 
+def window_of(index, sessions):
+    return {"window_index": index, "tabs": [
+        {"tab_index": i + 1, "pane_index": 1, "title": f"t{i}", "kind": "claude",
+         "session_id": sid, "restore": f"claude --resume {sid}"}
+        for i, sid in enumerate(sessions)]}
+
+
+def test_a_session_in_two_windows_of_one_restore_starts_once():
+    """Copilot: dedup must hold across windows within one restore.
+
+    The live set is captured before planning, so a session appearing twice in
+    the snapshot itself -- in two windows here -- was planned twice.
+    """
+    restore.current_tty = lambda: None  # type: ignore[assignment]
+    running = {}
+    first = restore.plan(window_of(1, ["same", "x"]), [], None, False, running)
+    second = restore.plan(window_of(2, ["same"]), [], None, False, running)
+    started = [a.command for a in first + second if a.will_run]
+    assert started.count("claude --resume same") == 1, started
+    assert second[0].skip_reason == "same session as tab 1 of snapshot window 1, started once"
+
+
+def test_a_session_twice_in_one_window_starts_once():
+    restore.current_tty = lambda: None  # type: ignore[assignment]
+    actions = restore.plan(window_of(1, ["same", "same"]), [], None, False, {})
+    assert [a.will_run for a in actions] == [True, False]
+
+
+def test_an_empty_running_map_stays_the_callers():
+    # `running or {}` replaced an empty caller dict with a fresh one, so a
+    # reservation made while planning one window vanished before the next.
+    restore.current_tty = lambda: None  # type: ignore[assignment]
+    running: dict = {}
+    restore.plan(window_of(1, ["sid"]), [], None, False, running)
+    assert "sid" in running, "the reservation did not reach the caller's map"
+
+
+def test_a_live_session_still_reads_as_running():
+    restore.current_tty = lambda: None  # type: ignore[assignment]
+    actions = restore.plan(window_of(1, ["s"]), [], None, False, {"s": "live window 4 tab 2"})
+    assert actions[0].skip_reason == "session already running in live window 4 tab 2"
+
+
 class NewWindowITerm:
     """Models iTerm creating a window with a given number of tabs."""
 
