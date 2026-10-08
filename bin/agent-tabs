@@ -167,7 +167,7 @@ def cmd_restore_all(args, snap, live) -> int:
     print(f"Snapshot captured {snap['captured_at']}  ({age_of(snap['captured_at'])})")
 
     if not pairs and not create:
-        print("\nNo live window matched a snapshot window.", file=sys.stderr)
+        print("\nNo live window was paired with a snapshot window.", file=sys.stderr)
         for note in notes:
             print(f"  {note}", file=sys.stderr)
         for window in reported:
@@ -230,22 +230,27 @@ def cmd_restore_all(args, snap, live) -> int:
             print(f"  (add --create-missing to rebuild {_window_list(rebuildable)})")
 
     if not args.go:
-        print(f"\nDry run. {total} tabs would start across {len(planned)} windows.")
+        # Count windows something starts in, not every window considered.
+        windows = sum(1 for _, _, actions in planned if any(a.will_run for a in actions))
+        print(f"\nDry run. {total} tabs would start across {windows} windows.")
         print("Add --go to execute.")
         return 0
     if total == 0:
         print("\nNothing to do.")
         return 0
 
-    started = 0
+    started = windows = 0
     for label, window_id, actions in planned:
         if label == "a new window":
-            started += restore_mod.restore_into_new_window(actions, args.force)
+            ran = restore_mod.restore_into_new_window(actions, args.force)
         elif window_id is None:
             print(f"\n{label} vanished before it could be restored.")
+            ran = 0
         else:
-            started += restore_mod.execute(actions, window_id, args.force)
-    print(f"\nStarted {started} tabs across {len(planned)} windows.")
+            ran = restore_mod.execute(actions, window_id, args.force)
+        started += ran
+        windows += 1 if ran else 0
+    print(f"\nStarted {started} tabs across {windows} windows.")
     return 0
 
 
@@ -257,28 +262,30 @@ def cmd_restore(args) -> int:
     try:
         with restore_mod.restore_lock():
             return _cmd_restore(args)
-    except restore_mod.RestoreInProgress as exc:
+    except restore_mod.RestoreLockError as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
 
 def _cmd_restore(args) -> int:
+    # Flag errors first: they need neither the snapshot nor iTerm, and must
+    # not hide behind an iTerm error.
+    if args.create_missing and not args.all:
+        print("--create-missing only applies to --all.", file=sys.stderr)
+        return 2
+    if args.all and (args.window is not None or args.new_window):
+        print(
+            "--all restores every matching window, so it cannot be combined "
+            "with a window number or --new-window.",
+            file=sys.stderr,
+        )
+        return 2
+
     snap = snap_mod.load(Path(args.file) if args.file else None)
     _warn_if_replaced(snap)
     live = restore_mod.live_tabs()
 
-    if args.create_missing and not args.all:
-        print("--create-missing only applies to --all.", file=sys.stderr)
-        return 2
-
     if args.all:
-        if args.window is not None or args.new_window:
-            print(
-                "--all restores every matching window, so it cannot be combined "
-                "with a window number or --new-window.",
-                file=sys.stderr,
-            )
-            return 2
         return cmd_restore_all(args, snap, live)
 
     try:
@@ -320,8 +327,9 @@ def _cmd_restore(args) -> int:
         return 0
 
     if target is None:
-        target = iterm.create_window(max(a.tab_index for a in runnable))
-    ran = restore_mod.execute(actions, target, args.force)
+        ran = restore_mod.restore_into_new_window(actions, args.force)
+    else:
+        ran = restore_mod.execute(actions, target, args.force)
     print(f"\nStarted {ran} tabs.")
     return 0
 
