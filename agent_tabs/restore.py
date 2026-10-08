@@ -487,10 +487,18 @@ def decide_restore_all(
     unsettled = sorted(
         ({i for i, _ in with_launcher} | set(without)) - paired - {launcher}
     )
+    # A window too tangled to solve with the launcher in keeps that reason:
+    # it, not the launcher's evidence, is why it was left alone.
+    tangled = {i for i in unsettled if any(
+        n.startswith(f"live window {i}:") and "too many other windows" in n for n in notes
+    )}
     # Notes about the launcher, or about a window whose note is replaced below.
-    dropped = {f"live window {i}:" for i in [launcher, *unsettled] if i is not None}
+    dropped = {
+        f"live window {i}:" for i in [launcher, *unsettled]
+        if i is not None and i not in tangled
+    }
     notes = [n for n in notes if not any(n.startswith(d) for d in dropped)]
-    for i in unsettled:
+    for i in sorted(set(unsettled) - tangled):
         notes.append(
             f"live window {i}: which snapshot window it is depends on whether the "
             "window you are in counts as evidence; restore it explicitly"
