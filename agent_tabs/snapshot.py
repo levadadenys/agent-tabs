@@ -157,11 +157,14 @@ def pre_boot_warning(snap: dict) -> str | None:
     now, before = agent_tab_count(snap), agent_tab_count(pinned)
     if before <= now:
         return None
+    # --create-missing: this fires for a reboot iTerm did not restore, where
+    # --all alone pairs nothing and creates nothing. Windows that did come back
+    # are still restored in place, so it is safe either way.
     return (
         f"This snapshot was captured after the last reboot and holds {now} "
         f"agent session(s). The last one before the reboot held {before}, "
         f"captured {pinned.get('captured_at', '?')}. To restore that instead:\n"
-        f"  agent-tabs restore --all -f {PRE_BOOT}"
+        f"  agent-tabs restore --all --create-missing -f {PRE_BOOT}"
     )
 
 
