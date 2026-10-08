@@ -10,6 +10,7 @@ smaller post-reboot one.
 """
 
 import importlib
+import json
 import os
 import sys
 import tempfile
@@ -194,6 +195,110 @@ def test_a_missed_pin_is_made_on_a_later_promotion():
         m.save(snap(21, after(2)))          # snapshot.json is post-boot now
         assert m.PRE_BOOT.exists(), "a missed pin was never retried"
         assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20
+
+
+def test_the_fullest_archive_wins_wherever_it_sits_in_history():
+    # Neither the newest nor the oldest: the full fleet in the middle.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp))
+        m.save(snap(5, before(30)))
+        m.save(snap(22, before(20)))
+        m.save(snap(3, before(1)))          # dying; held back, archived
+        m.LATEST.write_text("{unreadable")
+        m.save(snap(5, after(1)))
+        assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 22, "missed the full fleet"
+
+
+def test_a_half_dead_snapshot_loses_to_the_fuller_archive():
+    """Sonnet review: a shutdown that dragged on past the collapse guard got
+    its half-dead capture promoted, and the pin took snapshot.json as-is --
+    3 sessions, while history still held all 22."""
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp))
+        m.save(snap(22, before(20)))
+        for minute in range(10, 10 - m.COLLAPSE_STREAK - 1, -1):
+            m.save(snap(3, before(minute)))
+        assert m.agent_tab_count(m.load()) == 3, "setup: the drop should be accepted"
+        m.save(snap(3, after(1)))
+        assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 22, "pinned the half-dead capture"
+
+
+def test_with_history_rotated_out_the_snapshot_itself_is_pinned():
+    """The reason snapshot.json is a candidate at all: after a long idle spell
+    before the reboot, history holds only empty captures (here: none), and the
+    fleet survives in snapshot.json alone. Pinning only after it is
+    overwritten would lose it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp))
+        m.save(snap(20, before(60)))
+        for archive in m.HISTORY_DIR.glob("*.json"):
+            archive.unlink()
+        m.save(snap(20, after(1)))        # windows restored by iTerm; promoted
+        assert m.PRE_BOOT.exists(), "the fleet in snapshot.json was not pinned"
+        assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20
+
+
+def test_a_pin_is_never_redone_within_the_same_boot():
+    # Once pinned for this boot, later promotions leave it alone -- even if a
+    # fuller pre-boot capture turns up in history afterwards.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp))
+        m.save(snap(20, before(5)))
+        m.save(snap(20, after(1)))
+        assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20, "setup"
+        name = before(30).strftime("%Y%m%dT%H%M%S%f") + ".json"
+        (m.HISTORY_DIR / name).write_text(json.dumps(snap(25, before(30))))
+        m.save(snap(21, after(2)))
+        assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20, "the pin was redone"
+
+
+def test_a_pre_boot_snapshot_gets_no_warning_even_with_a_pin_present():
+    # Reading an older snapshot (e.g. -f a history file) is not "replaced".
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp))
+        m.save(snap(20, before(5)))
+        m.save(snap(20, after(1)))
+        assert m.PRE_BOOT.exists(), "setup"
+        assert m.pre_boot_warning(snap(5, before(3))) is None
+
+
+def test_boot_time_reads_kern_boottime_as_utc():
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["AGENT_TABS_HOME"] = tmp
+        import agent_tabs.snapshot as m
+        m = importlib.reload(m)
+
+        class Done:
+            stdout = "{ sec = 1790429604, usec = 512000 } Sat Sep 26 16:33:24 2026\n"
+        m.subprocess.run = lambda *a, **k: Done()  # type: ignore[assignment]
+        try:
+            assert m.boot_time() == datetime(2026, 9, 26, 13, 33, 24, tzinfo=timezone.utc), (
+                m.boot_time()
+            )
+        finally:
+            importlib.reload(m.subprocess)
+
+
+def test_a_naive_capture_time_is_read_as_utc():
+    import agent_tabs.snapshot as m
+    when = m.captured_at({"captured_at": "2026-09-26T13:33:00"})
+    assert when == datetime(2026, 9, 26, 13, 33, tzinfo=timezone.utc), when
+
+
+def test_damaged_files_never_crash_list_restore_or_a_capture():
+    """These readers run inside `list`, `restore` and every capture: bad UTF-8,
+    JSON that is not an object, and an object of the wrong shape."""
+    for content in (b"\xff\xfe not utf-8", b"[1, 2, 3]", b'{"windows": 7}'):
+        with tempfile.TemporaryDirectory() as tmp:
+            m = fresh(Path(tmp))
+            m.save(snap(20, before(5)))
+            m.LATEST.write_bytes(content)
+            (m.HISTORY_DIR / "20260101T000000000000.json").write_bytes(content)
+            m.PRE_BOOT.write_bytes(content)
+            m.save(snap(20, after(1)))       # the pin reads all three
+            assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20, content
+            m.PRE_BOOT.write_bytes(content)
+            assert m.pre_boot_warning(snap(1, after(3))) is None, content
 
 
 def test_an_unknown_boot_time_is_harmless():

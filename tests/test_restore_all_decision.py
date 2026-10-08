@@ -46,8 +46,32 @@ def test_the_launcher_window_is_never_paired():
     s = snap(["web", "api"], ["notes"])
     pairs, create, reported, notes = decide(s, live(["web", "api"], ["notes"]), launcher=1)
     assert pairs == [(2, 2)], pairs
-    assert reported == [1], reported
-    assert any("the one you are in" in n and "Cmd-N" in n for n in notes), notes
+    # Not "no live window matched": one did, the launcher, and the note says so.
+    assert reported == [], reported
+    assert any(
+        "the one you are in) is snapshot window 1" in n and "Cmd-N" in n for n in notes
+    ), notes
+
+
+def test_a_stray_window_never_takes_the_launchers_window():
+    """Sonnet review: with the launcher left out of the matching, a window
+    sharing one title with it took its snapshot window -- 4 sessions typed into
+    an unrelated window, and a re-run then skipped them as running."""
+    s = snap(["alpha", "beta", "gamma", "delta"])
+    l = live(["alpha", "beta", "gamma", "delta"], ["alpha", "other"])
+    for create_missing in (False, True):
+        pairs, create, reported, notes = decide(s, l, launcher=1, create_missing=create_missing)
+        assert pairs == [], f"snapshot window 1 went to a stray window: {pairs}"
+        assert reported == [], reported
+        assert create == ([1] if create_missing else []), create
+        assert any("live window 2" in n and "elsewhere" in n for n in notes), notes
+
+
+def test_the_launchers_own_matching_notes_are_not_shown():
+    # It is never paired; "no snapshot window matches" about it is noise.
+    s = snap(["web"])
+    _, _, _, notes = decide(s, live(["unrelated"], ["web"]), launcher=1)
+    assert not any(n.startswith("live window 1:") for n in notes), notes
 
 
 def test_create_missing_rebuilds_the_launchers_window_in_full():
@@ -87,7 +111,28 @@ def test_an_ambiguous_window_is_reported_not_rebuilt():
         s, live(["-zsh"], ["notes"]), launcher=1, create_missing=True
     )
     assert create == [3], (create, notes)
-    assert sum("not rebuilt" in n for n in notes) == 2, notes
+    assert sum("not restored" in n for n in notes) == 2, notes
+    # Explained once, in its own note -- not also listed as rebuildable.
+    assert reported == [], reported
+
+
+def test_without_create_missing_a_window_a_live_window_might_be_is_not_offered_a_rebuild():
+    """Sonnet review: plain --all listed these as "no live window matched --
+    rebuild it", which is false and would duplicate the live window."""
+    s = snap(["notes", "a"], ["notes", "b"], ["solo"])
+    _, _, reported, notes = decide(s, live(["-zsh"], ["notes"]), launcher=1)
+    assert reported == [3], reported
+    assert sum("not restored" in n and "might be it" in n for n in notes) == 2, notes
+
+
+def test_too_many_live_windows_on_one_title_are_refused_outright():
+    """The cap on live windows, not only on candidates: thirty windows sharing
+    one title took ~10s to solve. One candidate, thirteen windows."""
+    over = restore.EXACT_ASSIGNMENT_LIMIT + 1
+    s = snap(["shared"])
+    pairs, _, notes = restore.match_all(s, live(*[["shared"]] * over))
+    assert pairs == [], pairs
+    assert sum("too many other windows" in n for n in notes) == over, notes
 
 
 def test_without_a_launcher_every_window_is_a_candidate():
@@ -107,14 +152,15 @@ def test_would_create_matches_what_create_missing_actually_does():
     _, create, _, _, would_again = restore.decide_restore_all(s, l, 1, True)
     assert would == [w["window_index"] for w in create] == would_again == [3, 4], (
         would, [w["window_index"] for w in create])
-    assert sorted(w["window_index"] for w in reported) == [1, 2, 3, 4]
+    # 1 and 2 are explained as "might be it", not listed as unmatched.
+    assert sorted(w["window_index"] for w in reported) == [3, 4], reported
 
 
 def test_a_refused_window_gets_commands_that_work():
     # "restore N" alone, run from the wrong window, part-restores again.
     s = snap(["notes", "a"], ["notes", "b"])
     _, _, _, notes, _ = restore.decide_restore_all(s, live(["-zsh"], ["notes"]), 1, True)
-    refusal = next(n for n in notes if "not rebuilt" in n)
+    refusal = next(n for n in notes if "not restored" in n)
     assert "from a new tab in that window" in refusal, refusal
     assert "--new-window --go" in refusal, refusal
 

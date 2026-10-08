@@ -180,5 +180,32 @@ def test_restore_into_new_window_creates_nothing_when_nothing_runs():
     assert fake.windows == {}, "created an empty window"
 
 
+def test_no_window_is_created_when_everything_started_since_the_plan():
+    """Sonnet review: the window was created first and the recheck came
+    after, leaving an empty window when every session had been resumed by
+    hand meanwhile."""
+    fake = NewWindowITerm()
+    install(fake)
+    actions = [a for a in plan_new({}).values() if a.session_id]
+    restore.running_sessions = lambda: {  # type: ignore[assignment]
+        a.session_id: "live window 9 tab 1" for a in actions
+    }
+    assert restore.restore_into_new_window(actions) == 0
+    assert fake.windows == {}, f"created an empty window: {fake.windows}"
+
+
+def test_a_new_window_gets_only_the_tabs_it_will_use():
+    fake = NewWindowITerm()
+    install(fake)
+    actions = [a for a in plan_new({}).values() if a.session_id]
+    last = max(actions, key=lambda a: a.tab_index)
+    restore.running_sessions = lambda: {  # type: ignore[assignment]
+        last.session_id: "live window 9 tab 1"
+    }
+    ran = restore.restore_into_new_window(actions)
+    assert ran == len(actions) - 1, ran
+    assert list(fake.windows.values()) == [last.tab_index - 1], fake.windows
+
+
 if __name__ == "__main__":
     raise SystemExit(run(globals()))

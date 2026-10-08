@@ -305,7 +305,7 @@ def test_creatable_skips_windows_an_unpaired_window_might_be():
     create, refused = restore.creatable(s, l, pairs, unmatched)
     assert [w["window_index"] for w in create] == [3], create
     assert sorted(refused) == [1, 2], refused
-    assert all("not rebuilt" in n for n in refused.values()), refused
+    assert all("not restored" in n for n in refused.values()), refused
 
 
 def test_creatable_ignores_stray_overlap_from_a_paired_window():

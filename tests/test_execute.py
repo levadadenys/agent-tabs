@@ -173,6 +173,35 @@ def test_force_does_not_override_the_execute_time_check():
     assert fake.typed == []
 
 
+def test_no_blank_tab_is_created_for_a_session_started_since_the_plan():
+    """Sonnet review: tabs were added for every planned action before the
+    recheck, so a session started meanwhile left a blank tab behind."""
+    fake = FakeITerm(tabs=1)
+    install(fake, running={"sess-3": "live window 9 tab 1"})
+    acts = [
+        restore.Action(1, "t1", "claude", "claude --resume sess-1", None, "sess-1"),
+        restore.Action(3, "t3", "claude", "claude --resume sess-3", None, "sess-3"),
+    ]
+    assert restore.execute(acts, "w1") == 1
+    assert fake.created == 0, f"created {fake.created} blank tab(s)"
+
+
+def test_an_unusable_state_dir_is_a_message_not_a_traceback():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        blocker = Path(tmp) / "file"
+        blocker.write_text("")
+        original = snap_mod.STATE_DIR
+        snap_mod.STATE_DIR = blocker / "state"  # a directory under a file
+        try:
+            with restore.restore_lock():
+                raise AssertionError("took a lock in an impossible directory")
+        except restore.RestoreLockError as exc:
+            assert "Nothing was typed" in str(exc), exc
+        finally:
+            snap_mod.STATE_DIR = original
+
+
 def test_two_restores_cannot_run_at_once():
     import os, tempfile
     with tempfile.TemporaryDirectory() as tmp:
