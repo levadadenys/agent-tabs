@@ -166,11 +166,12 @@ A wrong pairing types one window's sessions into another, so:
   one live window. A title that is only a shell name (`-zsh`, `bash`, …) does
   not count: every idle tab looks like that;
 - the window `--all` runs in is never filled, since one of its tabs is the one
-  being typed in. Run it from a new window. If you run it from inside a
-  restored window instead, that window still takes part in the matching — so
-  no other window can claim its snapshot window — and is then reported;
-  running it again from a new window restores it, and anything already running
-  is skipped;
+  being typed in. Run it from a new window. Run from inside a restored window
+  instead, it is reported, and running again from a new window restores it —
+  anything already running is skipped. Meanwhile it neither hands its snapshot
+  window to another window nor settles another window's tie: a pairing is kept
+  only if it is the same with and without that window, and any other is
+  reported;
 - a pairing is used only when it is **forced**: the same in every best
   assignment. If the evidence fits two pairings equally well, those windows are
   reported, never guessed;
@@ -233,7 +234,7 @@ snapshot window this is. Run `agent-tabs list` and pass the number, or use
 **"Not running inside an iTerm tab."** Plain `restore` fills the window it runs
 in. Run it from an iTerm tab, or use `--all` or `--new-window`.
 
-**"The one you are in is snapshot window N" / "was not paired."** `--all` never
+**"The one you are in looks like snapshot window N" / "was not paired."** `--all` never
 fills the window it runs from. Open a new window (⌘N) and run it again; what is already running is
 skipped. With `--create-missing`, that window is rebuilt in a new window
 instead.

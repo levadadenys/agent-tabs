@@ -115,9 +115,10 @@ an issue.
 - Never create a window unless asked (`--new-window`, `--create-missing`), and
   never rebuild a snapshot window that an unpaired live window might be.
 - Never pair the window `restore --all` runs in: one of its tabs is the one
-  being typed in, so it could only ever be part-restored. It still competes in
-  the matching, and only its own pairing is dropped: excluded outright, its
-  snapshot window went to any window sharing a single title with it.
+  being typed in, so it could only ever be part-restored. Keep a pairing only
+  if it is the same with the launcher in the matching and without it: excluded,
+  its snapshot window went to any window sharing one title with it; included,
+  one coincidental title on it settled another window's tie.
 - A title that is only a shell name is not evidence of which window it was.
 - Never let a capture with no agent sessions overwrite a good snapshot, nor a
   collapsed one until the drop has persisted.
