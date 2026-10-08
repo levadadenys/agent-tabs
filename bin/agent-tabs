@@ -150,17 +150,19 @@ def cmd_restore_all(args, snap, live) -> int:
     new window instead of only being reported -- the path for a reboot where
     iTerm did not bring the windows back.
     """
-    pairs, unmatched, notes = restore_mod.match_all(snap, live)
+    launcher = restore_mod.current_window_index(live)
+    pairs, create, reported, notes = restore_mod.decide_restore_all(
+        snap, live, launcher, args.create_missing
+    )
     running = restore_mod.running_sessions()
 
     print(f"Snapshot captured {snap['captured_at']}  ({age_of(snap['captured_at'])})")
-    create = unmatched if args.create_missing else []
 
     if not pairs and not create:
         print("\nNo live window matched a snapshot window.", file=sys.stderr)
         for note in notes:
             print(f"  {note}", file=sys.stderr)
-        for window in unmatched:
+        for window in reported:
             tabs = len({t["tab_index"] for t in window["tabs"]})
             print(
                 f"  snapshot window {window['window_index']} ({tabs} tabs): "
@@ -201,7 +203,6 @@ def cmd_restore_all(args, snap, live) -> int:
         )
         _print_plan(window, actions, _warnings_for(window))
 
-    reported = [w for w in unmatched if w not in create]
     if reported or notes:
         print("\nNot restored:")
         for note in notes:
