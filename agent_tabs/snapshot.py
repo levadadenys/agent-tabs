@@ -109,11 +109,31 @@ def captured_at(snap: dict) -> datetime | None:
     return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
 
 
-def _pinned_for(booted: datetime) -> bool:
+def _read(path: Path) -> dict | None:
+    """A stored snapshot, or None if it is missing, unreadable or not one.
+
+    ValueError covers both bad JSON and bad UTF-8. These readers run inside
+    `list` and `restore`, and on every capture: a damaged file must cost a
+    feature, never crash them.
+    """
     try:
-        return json.loads(PRE_BOOT.read_text()).get("pinned_for_boot") == booted.isoformat()
-    except (json.JSONDecodeError, OSError, AttributeError):
-        return False
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _agents(snap: dict) -> int:
+    """agent_tab_count, treating a malformed snapshot as holding none."""
+    try:
+        return agent_tab_count(snap)
+    except (AttributeError, TypeError):
+        return 0
+
+
+def _pinned_for(booted: datetime) -> bool:
+    pinned = _read(PRE_BOOT)
+    return pinned is not None and pinned.get("pinned_for_boot") == booted.isoformat()
 
 
 def _fullest_pre_boot_archive(booted: datetime) -> dict | None:
@@ -125,16 +145,15 @@ def _fullest_pre_boot_archive(booted: datetime) -> dict | None:
     """
     best, best_count = None, 0
     for archive in sorted(HISTORY_DIR.glob("*.json"), reverse=True):
-        try:
-            snap = json.loads(archive.read_text())
-        except (json.JSONDecodeError, OSError):
+        snap = _read(archive)
+        if snap is None:
             continue
         # The capture's own time, as everywhere else in the pin logic; the
         # filename is only the save time, and the two must not disagree.
         when = captured_at(snap) or _archive_time(archive)
         if when is None or when >= booted:
             continue
-        count = agent_tab_count(snap)
+        count = _agents(snap)
         if count > best_count:  # strict: on a tie the newer one, seen first, wins
             best, best_count = snap, count
     return best
@@ -143,12 +162,14 @@ def _fullest_pre_boot_archive(booted: datetime) -> dict | None:
 def _pin_pre_boot(incoming: dict) -> None:
     """Keep the pre-reboot fleet recoverable once a post-reboot capture lands.
 
-    Runs on promotion. Pins once per boot, preferring snapshot.json when it
-    still holds the pre-reboot state. When it cannot -- unreadable, or already
-    replaced because an earlier pin failed -- history may still hold the
-    pre-reboot fleet, but only for about half an hour before it rotates out,
-    so that is pinned instead rather than lost. A failure here must never
-    block a capture.
+    Runs on promotion. Pins once per boot: the fuller of snapshot.json, if it
+    still predates the boot, and the fullest pre-boot capture in history.
+    Either alone can miss the fleet. snapshot.json may be unreadable, already
+    replaced because an earlier pin failed, or a half-dead shutdown capture
+    the collapse guard accepted because the shutdown dragged on; history keeps
+    only about half an hour, so after a long idle spell before the reboot the
+    fleet survives only in snapshot.json. On a tie snapshot.json wins: it is
+    the capture the guard vetted. A failure here must never block a capture.
     """
     booted = boot_time()
     if booted is None:
@@ -159,18 +180,17 @@ def _pin_pre_boot(incoming: dict) -> None:
     if _pinned_for(booted):
         return  # already pinned for this boot
 
-    candidate = None
-    try:
-        current = json.loads(LATEST.read_text())
-        taken = captured_at(current)
-        if taken is not None and taken < booted:
-            candidate = current
-    except (json.JSONDecodeError, OSError):
-        pass
-    if candidate is None:
-        candidate = _fullest_pre_boot_archive(booted)
-    if candidate is None:
+    candidates = []
+    current = _read(LATEST)
+    taken = captured_at(current) if current is not None else None
+    if taken is not None and taken < booted:
+        candidates.append(current)
+    archived = _fullest_pre_boot_archive(booted)
+    if archived is not None:
+        candidates.append(archived)
+    if not candidates:
         return
+    candidate = max(candidates, key=_agents)  # first, snapshot.json, on a tie
     # Record which boot this pin belongs to. A pre-boot.json left from an
     # earlier reboot must never be offered as "the last one before the
     # reboot" -- it would point a restore at an ancient fleet.
@@ -192,13 +212,10 @@ def pre_boot_warning(snap: dict) -> str | None:
     taken = captured_at(snap)
     if booted is None or taken is None or taken < booted or not PRE_BOOT.exists():
         return None
-    try:
-        pinned = json.loads(PRE_BOOT.read_text())
-    except (json.JSONDecodeError, OSError):
-        return None
-    if pinned.get("pinned_for_boot") != booted.isoformat():
-        return None  # left over from an earlier reboot
-    now, before = agent_tab_count(snap), agent_tab_count(pinned)
+    pinned = _read(PRE_BOOT)
+    if pinned is None or pinned.get("pinned_for_boot") != booted.isoformat():
+        return None  # unreadable, or left over from an earlier reboot
+    now, before = _agents(snap), _agents(pinned)
     if before <= now:
         return None
     # --create-missing: this fires for a reboot iTerm did not restore, where
@@ -241,7 +258,9 @@ def _count_of(path: Path) -> int | None:
     """Agent sessions in a stored snapshot, or None if it cannot be read."""
     try:
         return agent_tab_count(json.loads(path.read_text()))
-    except (json.JSONDecodeError, OSError, TypeError, AttributeError):
+    # ValueError, not just JSONDecodeError: bad UTF-8 raises UnicodeDecodeError,
+    # and this runs on every capture.
+    except (ValueError, OSError, TypeError, AttributeError):
         return None
 
 
