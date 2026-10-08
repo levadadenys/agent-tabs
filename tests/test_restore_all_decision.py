@@ -49,7 +49,8 @@ def test_the_launcher_window_is_never_paired():
     # Not "no live window matched": one did, the launcher, and the note says so.
     assert reported == [], reported
     assert any(
-        "the one you are in) is snapshot window 1" in n and "Cmd-N" in n for n in notes
+        "the one you are in) looks like snapshot window 1" in n and "Cmd-N" in n
+        for n in notes
     ), notes
 
 
@@ -62,9 +63,41 @@ def test_a_stray_window_never_takes_the_launchers_window():
     for create_missing in (False, True):
         pairs, create, reported, notes = decide(s, l, launcher=1, create_missing=create_missing)
         assert pairs == [], f"snapshot window 1 went to a stray window: {pairs}"
-        assert reported == [], reported
-        assert create == ([1] if create_missing else []), create
-        assert any("live window 2" in n and "elsewhere" in n for n in notes), notes
+        # Window 2 shares a title with it, so it is reported with commands for
+        # either case rather than rebuilt beside a window that may be it.
+        assert reported == [] and create == [], (reported, create)
+        assert any("live window 2:" in n and "depends on" in n for n in notes), notes
+        assert any("snapshot window 1: not restored" in n for n in notes), notes
+
+
+def test_the_launcher_never_settles_another_windows_tie():
+    """Delta review: let into the matching, a launcher sharing one title with
+    snapshot 1 resolved window 2's tie between 1 and 2 -- a guess, typed in."""
+    s = snap(["a", "b", "c", "x"], ["a", "b", "c", "y"])
+    l = live(["x"], ["a", "b", "c"])
+    for create_missing in (False, True):
+        pairs, create, _, notes = decide(s, l, launcher=1, create_missing=create_missing)
+        assert pairs == [], f"paired by the launcher's coincidence: {pairs}"
+        assert create == [], f"rebuilt a window live window 2 may be: {create}"
+        assert any("live window 2:" in n and "depends on" in n for n in notes), notes
+
+
+def test_the_launcher_never_redirects_another_window():
+    # Without the launcher, window 2 is snapshot 1 on two titles; with it, it
+    # would be pushed to snapshot 2 on one. Neither is kept.
+    s = snap(["p", "q"], ["t", "z"])
+    pairs, _, _, notes = decide(s, live(["p", "q"], ["p", "q", "t"]), launcher=1)
+    assert pairs == [], pairs
+    assert any("live window 2:" in n and "depends on" in n for n in notes), notes
+
+
+def test_dropping_the_launchers_notes_keeps_window_12s():
+    # The prefix match must stop at the colon: launcher 1 is not window 12.
+    titles = [[f"only{i}"] for i in range(1, 12)] + [["x"], ["x"]]
+    s = snap(["x"])
+    _, _, _, notes = decide(s, live(*titles), launcher=1)
+    assert any(n.startswith("live window 12:") for n in notes), notes
+    assert not any(n.startswith("live window 1:") for n in notes), notes
 
 
 def test_the_launchers_own_matching_notes_are_not_shown():

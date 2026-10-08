@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from agent_tabs import restore, snapshot as snap_mod  # noqa: E402
+from agent_tabs import iterm, restore, snapshot as snap_mod  # noqa: E402
 from runner import run  # noqa: E402
 
 _loader = SourceFileLoader("agent_tabs_cli", str(ROOT / "bin" / "agent-tabs"))
@@ -71,7 +71,12 @@ def setup(state: Path, the_snap, the_live) -> Recorder:
     restore.running_sessions = lambda: {}  # type: ignore[assignment]
     restore.execute = rec.execute  # type: ignore[assignment]
     restore.restore_into_new_window = rec.new_window  # type: ignore[assignment]
+    iterm.create_window = _no_real_windows  # type: ignore[assignment]
     return rec
+
+
+def _no_real_windows(*_):
+    raise AssertionError("reached the real iTerm create_window")
 
 
 def args(**overrides):
@@ -121,6 +126,28 @@ def test_force_is_passed_through_as_given():
             rec = setup(Path(tmp), snap([("web", "s1")]), live(["web"]))
             assert cli.cmd_restore(args(force=force)) == 0
             assert [f for _, f, _ in rec.calls] == [force], rec.calls
+
+
+def test_window_counts_name_only_windows_that_start_something():
+    import contextlib, io
+    with tempfile.TemporaryDirectory() as tmp:
+        the_snap = snap([("web", "s1")], [("api", "s2")])
+        rec = setup(Path(tmp), the_snap, live(["web"], ["api"]))
+        restore.running_sessions = lambda: {"s2": "live window 9 tab 1"}  # type: ignore[assignment]
+        for go in (False, True):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                assert cli.cmd_restore(args(go=go)) == 0
+            assert "across 1 windows" in out.getvalue(), out.getvalue()
+
+
+def test_a_single_window_new_window_restore_goes_through_the_recheck():
+    # restore N --new-window --go must use restore_into_new_window, which
+    # re-checks running sessions before creating anything.
+    with tempfile.TemporaryDirectory() as tmp:
+        rec = setup(Path(tmp), snap([("web", "s1")]), live(["web"]))
+        assert cli.cmd_restore(args(all=False, window=1, new_window=True)) == 0
+        assert [where for where, _, _ in rec.calls] == ["new"], rec.calls
 
 
 def test_flag_errors_come_before_touching_iterm():

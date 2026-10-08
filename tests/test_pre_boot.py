@@ -238,6 +238,17 @@ def test_with_history_rotated_out_the_snapshot_itself_is_pinned():
         assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20
 
 
+def test_a_fuller_snapshot_json_beats_a_smaller_archive():
+    # The other direction of "the fuller of the two".
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp))
+        m.save(snap(5, before(30)))
+        m.save(snap(20, before(10)))
+        max(m.HISTORY_DIR.glob("*.json")).unlink()  # history keeps only the 5
+        m.save(snap(20, after(1)))
+        assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20, "pinned the smaller archive"
+
+
 def test_a_pin_is_never_redone_within_the_same_boot():
     # Once pinned for this boot, later promotions leave it alone -- even if a
     # fuller pre-boot capture turns up in history afterwards.
