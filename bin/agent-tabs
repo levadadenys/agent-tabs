@@ -77,6 +77,7 @@ def _print_window(window: dict, tabs: list[dict]) -> None:
 
 def cmd_list(args) -> int:
     snap = snap_mod.load(Path(args.file) if args.file else None)
+    _warn_if_replaced(snap)
     wanted = set(args.kind or [])
 
     def keep(tab: dict) -> bool:
@@ -110,8 +111,27 @@ def cmd_list(args) -> int:
     if wanted and not shown:
         print(f"\nNo tabs of kind: {', '.join(sorted(wanted))}")
         return 0
-    print("\nRestore a window with:  agent-tabs restore <window-number> --go")
+    print(
+        "\nRestore everything:  agent-tabs restore --all            (dry run; add --go)"
+        "\n  windows iTerm did not bring back:  add --create-missing"
+    )
     return 0
+
+
+def _window_list(indexes) -> str:
+    """'snapshot window 2', 'snapshot windows 1 and 3', 'snapshot windows 1, 2 and 4'."""
+    items = [str(i) for i in indexes]
+    if len(items) == 1:
+        return f"snapshot window {items[0]}"
+    return f"snapshot windows {', '.join(items[:-1])} and {items[-1]}"
+
+
+def _warn_if_replaced(snap: dict) -> None:
+    """Flag a post-reboot snapshot that lost sessions. On stderr, so piped
+    output such as `list --commands` stays clean."""
+    warning = snap_mod.pre_boot_warning(snap)
+    if warning:
+        print("\n!! " + warning.replace("\n", "\n   ") + "\n", file=sys.stderr)
 
 
 def _print_plan(window, actions, warnings) -> None:
@@ -132,85 +152,140 @@ def _warnings_for(window: dict) -> dict:
 
 
 def cmd_restore_all(args, snap, live) -> int:
-    """Restore every live window that matches a snapshot window, in one pass."""
-    pairs, unmatched, notes = restore_mod.match_all(snap, live)
+    """Restore every live window that matches a snapshot window, in one pass.
+
+    With --create-missing, a snapshot window nothing matched is rebuilt in a
+    new window instead of only being reported -- the path for a reboot where
+    iTerm did not bring the windows back.
+    """
+    launcher = restore_mod.current_window_index(live)
+    pairs, create, reported, notes, would_create = restore_mod.decide_restore_all(
+        snap, live, launcher, args.create_missing
+    )
+    running = restore_mod.running_sessions()
 
     print(f"Snapshot captured {snap['captured_at']}  ({age_of(snap['captured_at'])})")
-    if not pairs:
-        print("\nNo live window matched a snapshot window.", file=sys.stderr)
+
+    if not pairs and not create:
+        print("\nNo live window was paired with a snapshot window.", file=sys.stderr)
         for note in notes:
             print(f"  {note}", file=sys.stderr)
-        # The worst case is where per-window commands are most useful, so list
-        # them here too rather than only in the partial-success path.
-        for window in unmatched:
+        for window in reported:
             tabs = len({t["tab_index"] for t in window["tabs"]})
             print(
                 f"  snapshot window {window['window_index']} ({tabs} tabs): "
-                f"agent-tabs restore {window['window_index']} --go",
+                f"agent-tabs restore {window['window_index']} --new-window --go",
                 file=sys.stderr,
             )
-        print(
-            "\nOpen the window you want, then run one of the commands above.",
-            file=sys.stderr,
-        )
+        # Name exactly what --create-missing would rebuild: it refuses windows a
+        # live window might be, so "rebuild all of them" would be a false promise.
+        if would_create and not args.create_missing:
+            print(
+                f"\nTo rebuild {_window_list(would_create)} in new windows at once:"
+                "\n  agent-tabs restore --all --create-missing --go",
+                file=sys.stderr,
+            )
         return 2
 
     planned = []
     total = 0
     for live_index, window in pairs:
         window_id = restore_mod.window_id_for_index(live, live_index)
-        actions = restore_mod.plan(window, live, window_id, args.force)
+        actions = restore_mod.plan(window, live, window_id, args.force, running)
         runnable = [a for a in actions if a.will_run]
         total += len(runnable)
-        planned.append((live_index, window_id, actions))
+        planned.append((f"live window {live_index}", window_id, actions))
         print(
             f"\nsnapshot window {window['window_index']} -> live window "
             f"{live_index}  ({len(runnable)} to start)"
         )
         _print_plan(window, actions, _warnings_for(window))
 
-    if unmatched or notes:
+    for window in create:
+        # target None: a window that does not exist yet has no busy tabs and
+        # cannot contain the tab this command runs from.
+        actions = restore_mod.plan(window, live, None, args.force, running)
+        runnable = [a for a in actions if a.will_run]
+        total += len(runnable)
+        planned.append(("a new window", None, actions))
+        print(
+            f"\nsnapshot window {window['window_index']} -> a new window  "
+            f"({len(runnable)} to start)"
+        )
+        _print_plan(window, actions, _warnings_for(window))
+
+    if reported or notes:
         print("\nNot restored:")
         for note in notes:
             print(f"  {note}")
-        for window in unmatched:
+        for window in reported:
             tabs = len({t["tab_index"] for t in window["tabs"]})
             print(
                 f"  snapshot window {window['window_index']} ({tabs} tabs): no live "
-                f"window matched — open one and run:  agent-tabs restore "
-                f"{window['window_index']} --go"
+                f"window matched — rebuild it with:  agent-tabs restore "
+                f"{window['window_index']} --new-window --go"
             )
+        rebuildable = [w["window_index"] for w in reported if w["window_index"] in would_create]
+        if rebuildable and not args.create_missing:
+            print(f"  (add --create-missing to rebuild {_window_list(rebuildable)})")
 
     if not args.go:
-        print(f"\nDry run. {total} tabs would start across {len(planned)} windows.")
+        # Count windows something starts in, not every window considered.
+        windows = sum(1 for _, _, actions in planned if any(a.will_run for a in actions))
+        print(f"\nDry run. {total} tabs would start across {windows} windows.")
         print("Add --go to execute.")
         return 0
     if total == 0:
         print("\nNothing to do.")
         return 0
 
-    started = 0
-    for live_index, window_id, actions in planned:
-        if window_id is None:
-            print(f"\nlive window {live_index} vanished before it could be restored.")
-            continue
-        started += restore_mod.execute(actions, window_id, args.force)
-    print(f"\nStarted {started} tabs across {len(planned)} windows.")
+    started = windows = 0
+    for label, window_id, actions in planned:
+        if label == "a new window":
+            ran = restore_mod.restore_into_new_window(actions, args.force)
+        elif window_id is None:
+            print(f"\n{label} vanished before it could be restored.")
+            ran = 0
+        else:
+            ran = restore_mod.execute(actions, window_id, args.force)
+        started += ran
+        windows += 1 if ran else 0
+    print(f"\nStarted {started} tabs across {windows} windows.")
     return 0
 
 
 def cmd_restore(args) -> int:
+    if not args.go:
+        return _cmd_restore(args)
+    # Only an executing restore types into tabs, so only it needs the lock; a
+    # dry run can always be read, even while another restore is running.
+    try:
+        with restore_mod.restore_lock():
+            return _cmd_restore(args)
+    except restore_mod.RestoreLockError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+
+def _cmd_restore(args) -> int:
+    # Flag errors first: they need neither the snapshot nor iTerm, and must
+    # not hide behind an iTerm error.
+    if args.create_missing and not args.all:
+        print("--create-missing only applies to --all.", file=sys.stderr)
+        return 2
+    if args.all and (args.window is not None or args.new_window):
+        print(
+            "--all restores every matching window, so it cannot be combined "
+            "with a window number or --new-window.",
+            file=sys.stderr,
+        )
+        return 2
+
     snap = snap_mod.load(Path(args.file) if args.file else None)
+    _warn_if_replaced(snap)
     live = restore_mod.live_tabs()
 
     if args.all:
-        if args.window is not None or args.new_window:
-            print(
-                "--all restores every matching window, so it cannot be combined "
-                "with a window number or --new-window.",
-                file=sys.stderr,
-            )
-            return 2
         return cmd_restore_all(args, snap, live)
 
     try:
@@ -233,7 +308,9 @@ def cmd_restore(args) -> int:
             return 2
         target_label = f"live window {restore_mod.current_window_index(live)}"
 
-    actions = restore_mod.plan(window, live, target, args.force)
+    actions = restore_mod.plan(
+        window, live, target, args.force, restore_mod.running_sessions()
+    )
     runnable = [a for a in actions if a.will_run]
 
     # Staleness matters most in exactly the situation this command is used in:
@@ -250,8 +327,9 @@ def cmd_restore(args) -> int:
         return 0
 
     if target is None:
-        target = iterm.create_window(max(a.tab_index for a in runnable))
-    ran = restore_mod.execute(actions, target, args.force)
+        ran = restore_mod.restore_into_new_window(actions, args.force)
+    else:
+        ran = restore_mod.execute(actions, target, args.force)
     print(f"\nStarted {ran} tabs.")
     return 0
 
@@ -291,6 +369,10 @@ def main() -> int:
     p_restore.add_argument(
         "--all", action="store_true",
         help="restore every live window that matches a snapshot window",
+    )
+    p_restore.add_argument(
+        "--create-missing", action="store_true",
+        help="with --all: rebuild snapshot windows nothing matched in new windows",
     )
     p_restore.add_argument("--force", action="store_true", help="overwrite tabs already running an agent")
     p_restore.set_defaults(func=cmd_restore)

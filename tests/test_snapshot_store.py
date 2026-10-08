@@ -87,6 +87,19 @@ def test_load_without_a_snapshot_explains_itself():
             raise AssertionError("expected FileNotFoundError")
 
 
+def test_a_missing_explicit_path_is_not_blamed_on_the_install():
+    # `-f <typo>` must not tell you to reinstall the recorder.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh_module(Path(tmp))
+        try:
+            m.load(Path(tmp) / "no-such-file.json")
+        except FileNotFoundError as exc:
+            assert "install" not in str(exc), str(exc)
+            assert "Check the path" in str(exc)
+        else:
+            raise AssertionError("expected FileNotFoundError")
+
+
 def test_directories_we_create_are_owner_only():
     with tempfile.TemporaryDirectory() as tmp:
         # Assert on HISTORY_DIR, not STATE_DIR: mkdtemp already makes STATE_DIR

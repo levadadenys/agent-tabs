@@ -49,7 +49,9 @@ These are deliberate. Do not "fix" them:
 
 - macOS and iTerm2 only; python3 standard library only, no packaging.
 - AppleScript rather than the iTerm2 Python API, so the same code path works
-  from a plain shell and from an AutoLaunch script.
+  from a plain shell and from the launchd recorder, with no dependency on
+  iTerm's Python runtime (not installed by default — the reason the original
+  AutoLaunch recorder never ran).
 - macOS does not expose process environments, so `CODEX_HOME` is derived from
   the rollout file path, not from `ps`.
 - Split panes are recorded but only the first pane of each tab is recreated.
@@ -58,7 +60,7 @@ These are deliberate. Do not "fix" them:
 
 Nothing installation-specific may be committed. Personal paths, account names
 and machine details belong in `~/.agent-tabs/config.json`, which is outside the
-repo. Before pushing, check:
+repo.
 
 Scanning is done by [gitleaks](https://gitleaks.io), configured in
 `.gitleaks.toml`. Its default rules cover credentials; two custom rules add
@@ -100,5 +102,30 @@ an issue.
 - Restore is a dry run by default; `--go` is explicit.
 - Never type into a tab holding live work, and never into the tab the command
   runs from. Liveness is re-checked at execute time, not just at plan time.
+- Never start a session that is already running anywhere, or twice in one
+  restore. Check at planning time AND immediately before typing, and hold
+  `restore_lock()` around any `--go`. `--force` does not override this.
 - Never replay a recorded command line containing shell syntax.
-- Never let a capture with no agent sessions overwrite a good snapshot.
+- Target windows by iTerm's window **id**, never its index: the index is
+  front-to-back position and changes whenever a window is focused.
+- Pair a live window with a snapshot window only when the pairing is forced —
+  the same in every optimal assignment. Report ties; never guess.
+  `tests/test_match_all_oracle.py` checks this against a brute force; keep it
+  passing.
+- Never create a window unless asked (`--new-window`, `--create-missing`), and
+  never rebuild a snapshot window that an unpaired live window might be.
+- Never pair the window `restore --all` runs in: one of its tabs is the one
+  being typed in, so it could only ever be part-restored. Keep a pairing only
+  if it is the same with the launcher in the matching and without it: excluded,
+  its snapshot window went to any window sharing one title with it; included,
+  one coincidental title on it settled another window's tie.
+- A title that is only a shell name is not evidence of which window it was.
+- Never let a capture with no agent sessions overwrite a good snapshot, nor a
+  collapsed one until the drop has persisted.
+- Keep the pre-reboot snapshot recoverable: `pre-boot.json` is pinned on the
+  first promotion after each boot, tagged with that boot: the fuller of
+  `snapshot.json` (if it predates the boot) and the fullest pre-boot capture
+  in history.
+- Re-check running sessions before creating a window and before adding tabs,
+  not only before typing: a session started since the plan must not leave a
+  blank window or tab behind.

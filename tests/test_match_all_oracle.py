@@ -8,7 +8,8 @@ guarantee.
 
 The oracle is written from the spec, not from restore.py, and deliberately
 shares none of its code:
-- score(live, snapshot) = distinct non-blank titles they share;
+- score(live, snapshot) = distinct non-blank titles they share, not counting
+  titles that are only a shell name;
 - an assignment is one-to-one over pairs with score >= 1, windows may be left
   unassigned;
 - optimal = maximum total score, then maximum number of pairs;
@@ -28,8 +29,14 @@ SEED = 20260930
 INSTANCES = 600
 
 
+# Written independently of restore.GENERIC_TITLES on purpose: a title that is
+# only a shell name identifies no window, so it is not evidence.
+_SHELLS = ("zsh", "bash", "sh", "fish", "tcsh", "csh", "ksh", "dash", "login")
+SHELL_NAMES = {name for base in _SHELLS for name in (base, f"-{base}")}
+
+
 def titles(window):
-    return {t.strip() for t in window if t.strip()}
+    return {t.strip() for t in window if t.strip() and t.strip().lower() not in SHELL_NAMES}
 
 
 def oracle(snapshot_windows, live_windows):
@@ -77,10 +84,14 @@ def random_instance(rnd):
     alphabet = "abcdef"[: rnd.randint(3, 6)]
 
     def window():
-        return [
-            rnd.choice([" ", ""]) if rnd.random() < 0.15 else rnd.choice(alphabet)
-            for _ in range(rnd.randint(1, 4))
-        ]
+        def title():
+            roll = rnd.random()
+            if roll < 0.12:
+                return rnd.choice([" ", ""])
+            if roll < 0.25:
+                return rnd.choice(sorted(SHELL_NAMES))  # shell names: not evidence
+            return rnd.choice(alphabet)
+        return [title() for _ in range(rnd.randint(1, 4))]
 
     snapshot_windows = [window() for _ in range(rnd.randint(1, 5))]
     live_windows = [window() for _ in range(rnd.randint(1, 5))]

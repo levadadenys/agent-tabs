@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
+from contextlib import contextmanager
 from functools import lru_cache
 from dataclasses import dataclass
 
@@ -25,6 +27,7 @@ class Action:
     kind: str
     command: str
     skip_reason: str | None = None
+    session_id: str | None = None
 
     @property
     def will_run(self) -> bool:
@@ -92,21 +95,41 @@ def window_id_for_index(tabs: list[dict], window_index: int) -> str | None:
     return None
 
 
+# A tab titled only with a shell name says nothing about which window it was
+# in: every idle tab looks like that. Counting it let a freshly opened window
+# pair with whichever snapshot window happened to have an idle shell tab.
+#
+# Derived from procs' canonical shell and login names, never copied: a copy
+# drifted immediately and missed tcsh, csh, ksh and dash. A login shell's
+# title carries a leading '-'.
+GENERIC_TITLES = frozenset(
+    name
+    for base in procs.SHELL_NAMES | procs.LOGIN_NAMES
+    for name in (base, f"-{base}")
+)
+
+
+def identifying_titles(tabs) -> set[str]:
+    """Titles that can tell windows apart: non-blank and not just a shell name."""
+    found = set()
+    for tab in tabs:
+        title = (tab.get("title") or "").strip()
+        if title and title.lower() not in GENERIC_TITLES:
+            found.add(title)
+    return found
+
+
 def _best_match(snap: dict, live: list[dict], window_index: int) -> tuple[int, dict] | None:
     """Best-scoring snapshot window for a live window, with its score.
 
     Raises Ambiguous when two snapshot windows fit equally well.
     """
-    live_titles = {
-        t["title"].strip()
-        for t in live
-        if t["window_index"] == window_index and t["title"].strip()
-    }
+    live_titles = identifying_titles(t for t in live if t["window_index"] == window_index)
     if not live_titles:
         return None
     scored = []
     for window in snap.get("windows", []):
-        titles = {t["title"].strip() for t in window.get("tabs", []) if t["title"].strip()}
+        titles = identifying_titles(window.get("tabs", []))
         score = len(titles & live_titles)
         if score:
             scored.append((score, window))
@@ -158,14 +181,10 @@ def select_window(snap: dict, number: int | None, live: list[dict]) -> tuple[dic
 
 def _overlaps(snap: dict, live: list[dict], window_index: int) -> dict[int, int]:
     """Title overlap between one live window and every snapshot window."""
-    live_titles = {
-        t["title"].strip()
-        for t in live
-        if t["window_index"] == window_index and t["title"].strip()
-    }
+    live_titles = identifying_titles(t for t in live if t["window_index"] == window_index)
     scores: dict[int, int] = {}
     for window in snap.get("windows", []):
-        titles = {t["title"].strip() for t in window.get("tabs", []) if t["title"].strip()}
+        titles = identifying_titles(window.get("tabs", []))
         score = len(titles & live_titles)
         if score:
             scores[window["window_index"]] = score
@@ -367,7 +386,189 @@ def match_all(
     return pairs, unmatched, notes
 
 
-def plan(window: dict, live: list[dict], target_window: str | None, force: bool) -> list[Action]:
+# Marks a `running` entry that is not live yet but will be started by this
+# restore, so a dry run can tell "already running" from "planned above".
+PLANNED = "planned: "
+
+
+def running_sessions() -> dict[str, str]:
+    """Agent sessions live right now, by session id -> where they are running.
+
+    Restore must not start a session that is already running elsewhere: after
+    a reboot you may have resumed a few by hand before restoring, and starting
+    them again gives a duplicate (Claude, for one, starts a copy).
+    """
+    running: dict[str, str] = {}
+    for window in snap_mod.build().get("windows", []):
+        for tab in window.get("tabs", []):
+            session = tab.get("session_id")
+            if session and tab.get("kind") in adapters.AGENT_KINDS:
+                running.setdefault(
+                    session, f"live window {window['window_index']} tab {tab['tab_index']}"
+                )
+    return running
+
+
+def resembles_snapshot(snap: dict, live: list[dict], window_index: int) -> bool:
+    """Whether a live window shares any identifying title with the snapshot."""
+    return bool(_overlaps(snap, live, window_index))
+
+
+def creatable(
+    snap: dict, live: list[dict], pairs: list[tuple[int, dict]], unmatched: list[dict]
+) -> tuple[list[dict], dict[int, str]]:
+    """Which unmatched snapshot windows --create-missing may rebuild.
+
+    A snapshot window left unpaired because some live window might be it --
+    an unpaired live window that shares titles with it -- is reported, not
+    rebuilt: creating it would sidestep a deliberate refusal to guess, and
+    leave the window that may be the real one sitting idle. Live windows that
+    were paired do not count: their stray overlap with another snapshot window
+    says nothing about it.
+    """
+    paired = {w for w, _ in pairs}
+    contested: dict[int, list[int]] = {}
+    for live_index in sorted({t["window_index"] for t in live} - paired):
+        for snap_index in _overlaps(snap, live, live_index):
+            contested.setdefault(snap_index, []).append(live_index)
+
+    create: list[dict] = []
+    refused: dict[int, str] = {}
+    for window in unmatched:
+        index = window["window_index"]
+        if index in contested:
+            who = ", ".join(f"live window {w}" for w in contested[index])
+            refused[index] = (
+                f"snapshot window {index}: not restored, {who} might be it. "
+                f"If it is, run  agent-tabs restore {index}  from a new tab in "
+                f"that window; if not,  agent-tabs restore {index} --new-window --go"
+            )
+        else:
+            create.append(window)
+    return create, refused
+
+
+def decide_restore_all(
+    snap: dict, live: list[dict], launcher: int | None, create_missing: bool
+) -> tuple[list[tuple[int, dict]], list[dict], list[dict], list[str], list[int]]:
+    """Everything `restore --all` decides, before anything is printed or typed.
+
+    Returns (pairs, create, reported, notes, would_create): live windows to
+    fill, snapshot windows to rebuild in new windows, snapshot windows to only
+    report, the reasons for what was left alone, and which snapshot windows
+    --create-missing rebuilds -- computed whether or not it was passed, so a
+    hint can name exactly what it would do instead of promising "all".
+
+    The launcher -- the window this runs in -- is never paired: one of its
+    tabs is the one being typed in, so pairing it always left that snapshot
+    window part-restored. Whether it competes in the matching is itself a
+    guess, each way wrong in a different case. Left out, its snapshot window
+    is up for grabs, and a window sharing one title with it takes it. Let in
+    on one coincidental title, it resolves another window's tie for it. So a
+    pairing is kept only when it comes out the same both ways; a window whose
+    pairing depends on the launcher is reported, never guessed.
+
+    A snapshot window some unpaired live window might be is reported with
+    commands that work either way, with or without --create-missing: "no live
+    window matched" would be false, and its rebuild command a duplicate. The
+    launcher's own snapshot window is no exception: its claim may rest on a
+    single title too.
+    """
+    with_launcher, _, notes = match_all(snap, live)
+    candidates = [t for t in live if t["window_index"] != launcher]
+    without = {i: w["window_index"] for i, w in match_all(snap, candidates)[0]}
+
+    mine = next((w for i, w in with_launcher if i == launcher), None)
+    pairs = [
+        (i, w) for i, w in with_launcher
+        if i != launcher and without.get(i) == w["window_index"]
+    ]
+    paired = {i for i, _ in pairs}
+    unsettled = sorted(
+        ({i for i, _ in with_launcher} | set(without)) - paired - {launcher}
+    )
+    # A window too tangled to solve with the launcher in keeps that reason:
+    # it, not the launcher's evidence, is why it was left alone.
+    tangled = {i for i in unsettled if any(
+        n.startswith(f"live window {i}:") and "too many other windows" in n for n in notes
+    )}
+    # Notes about the launcher, or about a window whose note is replaced below.
+    dropped = {
+        f"live window {i}:" for i in [launcher, *unsettled]
+        if i is not None and i not in tangled
+    }
+    notes = [n for n in notes if not any(n.startswith(d) for d in dropped)]
+    for i in sorted(set(unsettled) - tangled):
+        notes.append(
+            f"live window {i}: which snapshot window it is depends on whether the "
+            "window you are in counts as evidence; restore it explicitly"
+        )
+
+    claimed = {w["window_index"] for _, w in pairs}
+    unmatched = [w for w in snap.get("windows", []) if w["window_index"] not in claimed]
+    would, refused = creatable(snap, candidates, pairs, unmatched)
+    would_create = [w["window_index"] for w in would]
+    create: list[dict] = would if create_missing else []
+
+    if mine is not None:
+        index = mine["window_index"]
+        notes.append(
+            f"live window {launcher} (the one you are in) looks like snapshot "
+            f"window {index}, but restore never types into the window it runs "
+            "from. "
+            + (
+                "It is rebuilt in a new window below."
+                if create_missing and index in would_create
+                else f"See snapshot window {index} below."
+                if index in refused
+                else "Open a new window (Cmd-N) and run this again to restore it; "
+                "anything already running is skipped."
+            )
+        )
+    elif launcher is not None and resembles_snapshot(snap, live, launcher):
+        notes.append(
+            f"live window {launcher} (the one you are in) was not paired: restore "
+            "never types into the window it runs from. "
+            + (
+                "Where nothing else matches its snapshot window, it is rebuilt in "
+                "a new window below."
+                if create_missing
+                else "Open a new window (Cmd-N) and run this again to restore it; "
+                "anything already running is skipped."
+            )
+        )
+
+    notes += list(refused.values())
+    # The launcher's window is explained by its own note, not as unmatched.
+    reported = [
+        w for w in unmatched
+        if w not in create and w["window_index"] not in refused and w is not mine
+    ]
+    return pairs, create, reported, notes, would_create
+
+
+def plan(
+    window: dict,
+    live: list[dict],
+    target_window: str | None,
+    force: bool,
+    running: dict[str, str] | None = None,
+) -> list[Action]:
+    """Decide what to type into each tab.
+
+    `force` lets restore type into a tab that is busy. It does not override
+    `running`: starting a session that is already running elsewhere is never
+    wanted, whatever the tab it would land in.
+
+    `running` is also updated in place: each session this plan will start is
+    reserved in it. Pass the SAME dict to every plan in one restore, so a
+    session that appears in two tabs or two windows of the snapshot starts
+    once, not once per appearance.
+    """
+    if running is None:
+        # Not `running or {}`: an empty caller dict must stay the caller's, or
+        # reservations made here would be lost before the next window's plan.
+        running = {}
     own_tty = current_tty()
     busy: dict[int, dict] = {}
     if target_window is not None:
@@ -383,14 +584,29 @@ def plan(window: dict, live: list[dict], target_window: str | None, force: bool)
             # Extra panes in a split tab are recorded but not recreated.
             continue
         seen_tabs.add(index)
-        action = Action(index, tab.get("title") or "", tab.get("kind") or "", tab.get("restore") or "")
+        session = tab.get("session_id")
+        action = Action(
+            index, tab.get("title") or "", tab.get("kind") or "",
+            tab.get("restore") or "", session_id=session,
+        )
         existing = busy.get(index)
         if not action.command:
             action.skip_reason = "nothing recorded"
+        elif session and session in running:
+            where = running[session]
+            action.skip_reason = (
+                f"same session as {where[len(PLANNED):]}, started once"
+                if where.startswith(PLANNED)
+                else f"session already running in {where}"
+            )
         elif existing and procs.normalise_tty(existing["tty"]) == own_tty:
             action.skip_reason = "this is the tab you are running from"
         elif existing and existing.get("busy") and not force:
             action.skip_reason = f"already running {existing['kind']} (use --force)"
+        if action.will_run and session:
+            running[session] = (
+                f"{PLANNED}tab {index} of snapshot window {window.get('window_index', '?')}"
+            )
         actions.append(action)
     return actions
 
@@ -414,6 +630,14 @@ def execute(actions: list[Action], window_id: str, force: bool = False) -> int:
     if not any(t["window_id"] == window_id for t in iterm.enumerate_tabs()):
         print(f"  window {window_id} is gone; nothing typed into it")
         return 0
+    # The plan's duplicate check is a snapshot: a session resumed by hand, or
+    # by another restore, after planning would otherwise start twice. Check
+    # again immediately before typing. --force does not override this.
+    runnable = _not_started_since(runnable, running_sessions())
+    if not runnable:
+        return 0
+    # Only as many tabs as will be typed into: not blank ones for sessions
+    # that turned out to be running already.
     ensure_tabs(window_id, max(a.tab_index for a in runnable))
 
     busy_now: set[int] = set()
@@ -436,6 +660,80 @@ def execute(actions: list[Action], window_id: str, force: bool = False) -> int:
         iterm.run_in_tab(window_id, action.tab_index, action.command)
         ran += 1
     return ran
+
+
+def _not_started_since(runnable: list[Action], running: dict[str, str]) -> list[Action]:
+    """Drop, and report, actions whose session started since planning."""
+    remaining = []
+    for action in runnable:
+        if action.session_id and action.session_id in running:
+            print(
+                f"  tab {action.tab_index:>2}  SKIP (session started in "
+                f"{running[action.session_id]} since the plan)"
+            )
+        else:
+            remaining.append(action)
+    return remaining
+
+
+class RestoreLockError(RuntimeError):
+    """The restore lock could not be taken; nothing was typed."""
+
+
+class RestoreInProgress(RestoreLockError):
+    """Another `restore --go` holds the lock."""
+
+
+@contextmanager
+def restore_lock():
+    """Serialise restores that type into tabs.
+
+    Two at once would each plan before the other starts anything, and both
+    could start the same session. flock is released when the process exits,
+    so a crashed restore cannot leave a stale lock behind.
+    """
+    lock_path = snap_mod.STATE_DIR / "restore.lock"
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        handle = open(lock_path, "w")
+    except OSError as exc:
+        raise RestoreLockError(
+            f"Cannot take the restore lock {lock_path}: {exc.strerror or exc}. "
+            "Nothing was typed."
+        ) from exc
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise RestoreInProgress(
+                "Another `agent-tabs restore --go` is running. Wait for it to "
+                "finish, then run this again: anything it started will be skipped."
+            ) from exc
+        yield
+    finally:
+        handle.close()
+
+
+def restore_into_new_window(actions: list[Action], force: bool = False) -> int:
+    """Create a window for a snapshot window nothing matched, then fill it.
+
+    The window's id is captured by the script that creates it, so focusing
+    another window meanwhile cannot redirect the restore.
+
+    Running sessions are re-checked before the window is created, not only
+    when typing: if every one was started since the plan, a new window would
+    sit there empty. execute() checks again, for anything started meanwhile.
+    """
+    runnable = [a for a in actions if a.will_run]
+    if not runnable:
+        return 0
+    started = running_sessions()
+    remaining = [a for a in runnable if not (a.session_id and a.session_id in started)]
+    if not remaining:
+        _not_started_since(runnable, started)  # reports each skip
+        return 0
+    window_id = iterm.create_window(max(a.tab_index for a in remaining))
+    return execute(actions, window_id, force)
 
 
 def _tty_of(window_id: str, tab_index: int) -> str | None:

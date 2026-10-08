@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +14,11 @@ from . import adapters, iterm, procs
 
 STATE_DIR = Path(os.environ.get("AGENT_TABS_HOME", Path.home() / ".agent-tabs"))
 LATEST = STATE_DIR / "snapshot.json"
+# The last snapshot captured before the most recent boot, pinned on the first
+# promotion after that boot. History alone cannot protect it: it keeps only the
+# last HISTORY_KEEP captures, and an idle iTerm after a reboot fills history
+# with empty captures within about half an hour.
+PRE_BOOT = STATE_DIR / "pre-boot.json"
 HISTORY_DIR = STATE_DIR / "history"
 HISTORY_KEEP = 60
 
@@ -80,6 +87,148 @@ def build() -> dict:
     }
 
 
+def boot_time() -> datetime | None:
+    """When the machine last booted, or None if it cannot be determined."""
+    try:
+        raw = subprocess.run(
+            ["sysctl", "-n", "kern.boottime"], capture_output=True, text=True, check=False
+        ).stdout
+    except OSError:
+        return None
+    match = re.search(r"sec = (\d+)", raw)
+    if not match:
+        return None
+    return datetime.fromtimestamp(int(match.group(1)), timezone.utc)
+
+
+def captured_at(snap: dict) -> datetime | None:
+    try:
+        when = datetime.fromisoformat(snap["captured_at"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
+def _read(path: Path) -> dict | None:
+    """A stored snapshot, or None if it is missing, unreadable or not one.
+
+    ValueError covers both bad JSON and bad UTF-8. These readers run inside
+    `list` and `restore`, and on every capture: a damaged file must cost a
+    feature, never crash them.
+    """
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _agents(snap: dict) -> int:
+    """agent_tab_count, treating a malformed snapshot as holding none."""
+    try:
+        return agent_tab_count(snap)
+    except (AttributeError, TypeError):
+        return 0
+
+
+def _pinned_for(booted: datetime) -> bool:
+    pinned = _read(PRE_BOOT)
+    return pinned is not None and pinned.get("pinned_for_boot") == booted.isoformat()
+
+
+def _fullest_pre_boot_archive(booted: datetime) -> dict | None:
+    """The pre-reboot capture with the most agent sessions still in history.
+
+    Not simply the newest: during shutdown, tabs die one at a time, so the last
+    captures before a reboot are half-dead ones -- archived, never promoted.
+    Picking the newest would pin 3 sessions instead of 22.
+    """
+    best, best_count = None, 0
+    for archive in sorted(HISTORY_DIR.glob("*.json"), reverse=True):
+        snap = _read(archive)
+        if snap is None:
+            continue
+        # The capture's own time, as everywhere else in the pin logic; the
+        # filename is only the save time, and the two must not disagree.
+        when = captured_at(snap) or _archive_time(archive)
+        if when is None or when >= booted:
+            continue
+        count = _agents(snap)
+        if count > best_count:  # strict: on a tie the newer one, seen first, wins
+            best, best_count = snap, count
+    return best
+
+
+def _pin_pre_boot(incoming: dict) -> None:
+    """Keep the pre-reboot fleet recoverable once a post-reboot capture lands.
+
+    Runs on promotion. Pins once per boot: the fuller of snapshot.json, if it
+    still predates the boot, and the fullest pre-boot capture in history.
+    Either alone can miss the fleet. snapshot.json may be unreadable, already
+    replaced because an earlier pin failed, or a half-dead shutdown capture
+    the collapse guard accepted because the shutdown dragged on; history keeps
+    only about half an hour, so after a long idle spell before the reboot the
+    fleet survives only in snapshot.json. On a tie snapshot.json wins: it is
+    the capture the guard vetted. A failure here must never block a capture.
+    """
+    booted = boot_time()
+    if booted is None:
+        return
+    after = captured_at(incoming)
+    if after is None or after < booted:
+        return  # still before this boot: nothing to protect yet
+    if _pinned_for(booted):
+        return  # already pinned for this boot
+
+    candidates = []
+    current = _read(LATEST)
+    taken = captured_at(current) if current is not None else None
+    if taken is not None and taken < booted:
+        candidates.append(current)
+    archived = _fullest_pre_boot_archive(booted)
+    if archived is not None:
+        candidates.append(archived)
+    if not candidates:
+        return
+    candidate = max(candidates, key=_agents)  # first, snapshot.json, on a tie
+    # Record which boot this pin belongs to. A pre-boot.json left from an
+    # earlier reboot must never be offered as "the last one before the
+    # reboot" -- it would point a restore at an ancient fleet.
+    try:
+        _write_atomic(PRE_BOOT, {**candidate, "pinned_for_boot": booted.isoformat()})
+    except OSError:
+        pass
+
+
+def pre_boot_warning(snap: dict) -> str | None:
+    """Explain when the snapshot in use postdates a reboot and lost sessions.
+
+    After a reboot with no restored windows, starting even one session before
+    restoring lets that small capture replace the full one about a minute
+    later. The full one is pinned in pre-boot.json; say so rather than let a
+    restore quietly bring back the wrong fleet.
+    """
+    booted = boot_time()
+    taken = captured_at(snap)
+    if booted is None or taken is None or taken < booted or not PRE_BOOT.exists():
+        return None
+    pinned = _read(PRE_BOOT)
+    if pinned is None or pinned.get("pinned_for_boot") != booted.isoformat():
+        return None  # unreadable, or left over from an earlier reboot
+    now, before = _agents(snap), _agents(pinned)
+    if before <= now:
+        return None
+    # --create-missing: this fires for a reboot iTerm did not restore, where
+    # --all alone pairs nothing and creates nothing. Windows that did come back
+    # are still restored in place, so it is safe either way.
+    return (
+        f"This snapshot was captured after the last reboot and holds {now} "
+        f"agent session(s). The last one before the reboot held {before}, "
+        f"captured {pinned.get('captured_at', '?')}. To restore that instead:\n"
+        f"  agent-tabs restore --all --create-missing -f {PRE_BOOT}"
+    )
+
+
 def agent_tab_count(snap: dict) -> int:
     return sum(
         1
@@ -109,7 +258,9 @@ def _count_of(path: Path) -> int | None:
     """Agent sessions in a stored snapshot, or None if it cannot be read."""
     try:
         return agent_tab_count(json.loads(path.read_text()))
-    except (json.JSONDecodeError, OSError, TypeError, AttributeError):
+    # ValueError, not just JSONDecodeError: bad UTF-8 raises UnicodeDecodeError,
+    # and this runs on every capture.
+    except (ValueError, OSError, TypeError, AttributeError):
         return None
 
 
@@ -218,6 +369,7 @@ def save(snap: dict) -> tuple[Path | None, Path]:
         if not persistent:
             return None, archive
 
+    _pin_pre_boot(snap)
     _write_atomic(LATEST, snap)
     return LATEST, archive
 
@@ -225,6 +377,13 @@ def save(snap: dict) -> tuple[Path | None, Path]:
 def load(path: Path | None = None) -> dict:
     target = path or LATEST
     if not target.exists():
+        # An explicit -f path that does not exist is a typo or a rotated-out
+        # history file, not a missing install -- say which.
+        if path is not None:
+            raise FileNotFoundError(
+                f"No snapshot at {target}. Check the path; history files rotate "
+                f"out after {HISTORY_KEEP} captures (ls {HISTORY_DIR})."
+            )
         raise FileNotFoundError(
             f"No snapshot at {target}. Is the recorder installed? Run: agent-tabs install"
         )
