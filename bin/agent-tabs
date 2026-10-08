@@ -250,6 +250,19 @@ def cmd_restore_all(args, snap, live) -> int:
 
 
 def cmd_restore(args) -> int:
+    if not args.go:
+        return _cmd_restore(args)
+    # Only an executing restore types into tabs, so only it needs the lock; a
+    # dry run can always be read, even while another restore is running.
+    try:
+        with restore_mod.restore_lock():
+            return _cmd_restore(args)
+    except restore_mod.RestoreInProgress as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+
+def _cmd_restore(args) -> int:
     snap = snap_mod.load(Path(args.file) if args.file else None)
     _warn_if_replaced(snap)
     live = restore_mod.live_tabs()
