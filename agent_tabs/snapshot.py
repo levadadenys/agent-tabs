@@ -314,6 +314,13 @@ def save(snap: dict) -> tuple[Path | None, Path]:
 def load(path: Path | None = None) -> dict:
     target = path or LATEST
     if not target.exists():
+        # An explicit -f path that does not exist is a typo or a rotated-out
+        # history file, not a missing install -- say which.
+        if path is not None:
+            raise FileNotFoundError(
+                f"No snapshot at {target}. Check the path; history files rotate "
+                f"out after {HISTORY_KEEP} captures (ls {HISTORY_DIR})."
+            )
         raise FileNotFoundError(
             f"No snapshot at {target}. Is the recorder installed? Run: agent-tabs install"
         )
