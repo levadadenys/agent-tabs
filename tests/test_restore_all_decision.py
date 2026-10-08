@@ -82,6 +82,39 @@ def test_the_launcher_never_settles_another_windows_tie():
         assert any("live window 2:" in n and "depends on" in n for n in notes), notes
 
 
+def test_the_launcher_note_matches_what_happens_to_its_window():
+    """Final review: no test pinned the note when the launcher's own snapshot
+    window is refused, so it could claim "rebuilt below" for a window that is
+    not rebuilt."""
+    s = snap(["p", "q"], ["t", "z"])
+    l = live(["p", "q"], ["p"])
+    for create_missing in (False, True):
+        _, create, _, notes = decide(s, l, launcher=1, create_missing=create_missing)
+        assert 1 not in create, create
+        note = next(n for n in notes if "the one you are in" in n)
+        assert "See snapshot window 1 below" in note, note
+        assert any(n.startswith("snapshot window 1: not restored") for n in notes), notes
+    # And when nothing contests it: rebuilt, or the Cmd-N advice.
+    s = snap(["web", "api"], ["notes"])
+    l = live(["web", "api"], ["notes"])
+    for create_missing, expected in ((True, "rebuilt in a new window below"), (False, "Cmd-N")):
+        _, _, _, notes = decide(s, l, launcher=1, create_missing=create_missing)
+        note = next(n for n in notes if "the one you are in" in n)
+        assert expected in note, note
+
+
+def test_a_group_too_tangled_with_the_launcher_says_so():
+    # The launcher tips the group over the solver cap; those windows were left
+    # alone for that reason, and should say so.
+    cap = restore.EXACT_ASSIGNMENT_LIMIT
+    s = snap(*[["shared", f"u{i}"] for i in range(cap)])
+    l = live(["shared"], *[["shared", f"u{i}"] for i in range(cap)])
+    pairs, _, _, notes = decide(s, l, launcher=1)
+    assert pairs == [], pairs
+    assert any("too many other windows" in n for n in notes), notes
+    assert not any("depends on" in n for n in notes), notes
+
+
 def test_the_launcher_never_redirects_another_window():
     # Without the launcher, window 2 is snapshot 1 on two titles; with it, it
     # would be pushed to snapshot 2 on one. Neither is kept.
