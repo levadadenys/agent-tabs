@@ -92,21 +92,33 @@ def window_id_for_index(tabs: list[dict], window_index: int) -> str | None:
     return None
 
 
+# A tab titled only with a shell name says nothing about which window it was
+# in: every idle tab looks like that. Counting it let a freshly opened window
+# pair with whichever snapshot window happened to have an idle shell tab.
+GENERIC_TITLES = frozenset({"zsh", "-zsh", "bash", "-bash", "sh", "-sh", "fish", "-fish", "login"})
+
+
+def identifying_titles(tabs) -> set[str]:
+    """Titles that can tell windows apart: non-blank and not just a shell name."""
+    found = set()
+    for tab in tabs:
+        title = (tab.get("title") or "").strip()
+        if title and title.lower() not in GENERIC_TITLES:
+            found.add(title)
+    return found
+
+
 def _best_match(snap: dict, live: list[dict], window_index: int) -> tuple[int, dict] | None:
     """Best-scoring snapshot window for a live window, with its score.
 
     Raises Ambiguous when two snapshot windows fit equally well.
     """
-    live_titles = {
-        t["title"].strip()
-        for t in live
-        if t["window_index"] == window_index and t["title"].strip()
-    }
+    live_titles = identifying_titles(t for t in live if t["window_index"] == window_index)
     if not live_titles:
         return None
     scored = []
     for window in snap.get("windows", []):
-        titles = {t["title"].strip() for t in window.get("tabs", []) if t["title"].strip()}
+        titles = identifying_titles(window.get("tabs", []))
         score = len(titles & live_titles)
         if score:
             scored.append((score, window))
@@ -158,14 +170,10 @@ def select_window(snap: dict, number: int | None, live: list[dict]) -> tuple[dic
 
 def _overlaps(snap: dict, live: list[dict], window_index: int) -> dict[int, int]:
     """Title overlap between one live window and every snapshot window."""
-    live_titles = {
-        t["title"].strip()
-        for t in live
-        if t["window_index"] == window_index and t["title"].strip()
-    }
+    live_titles = identifying_titles(t for t in live if t["window_index"] == window_index)
     scores: dict[int, int] = {}
     for window in snap.get("windows", []):
-        titles = {t["title"].strip() for t in window.get("tabs", []) if t["title"].strip()}
+        titles = identifying_titles(window.get("tabs", []))
         score = len(titles & live_titles)
         if score:
             scores[window["window_index"]] = score
@@ -388,6 +396,86 @@ def running_sessions() -> dict[str, str]:
                     session, f"live window {window['window_index']} tab {tab['tab_index']}"
                 )
     return running
+
+
+def resembles_snapshot(snap: dict, live: list[dict], window_index: int) -> bool:
+    """Whether a live window shares any identifying title with the snapshot."""
+    return bool(_overlaps(snap, live, window_index))
+
+
+def creatable(
+    snap: dict, live: list[dict], pairs: list[tuple[int, dict]], unmatched: list[dict]
+) -> tuple[list[dict], dict[int, str]]:
+    """Which unmatched snapshot windows --create-missing may rebuild.
+
+    A snapshot window left unpaired because some live window might be it --
+    an unpaired live window that shares titles with it -- is reported, not
+    rebuilt: creating it would sidestep a deliberate refusal to guess, and
+    leave the window that may be the real one sitting idle. Live windows that
+    were paired do not count: their stray overlap with another snapshot window
+    says nothing about it.
+    """
+    paired = {w for w, _ in pairs}
+    contested: dict[int, list[int]] = {}
+    for live_index in sorted({t["window_index"] for t in live} - paired):
+        for snap_index in _overlaps(snap, live, live_index):
+            contested.setdefault(snap_index, []).append(live_index)
+
+    create: list[dict] = []
+    refused: dict[int, str] = {}
+    for window in unmatched:
+        index = window["window_index"]
+        if index in contested:
+            who = ", ".join(f"live window {w}" for w in contested[index])
+            refused[index] = (
+                f"snapshot window {index}: not rebuilt, {who} might be it; "
+                f"restore it explicitly with  agent-tabs restore {index}"
+            )
+        else:
+            create.append(window)
+    return create, refused
+
+
+def decide_restore_all(
+    snap: dict, live: list[dict], launcher: int | None, create_missing: bool
+) -> tuple[list[tuple[int, dict]], list[dict], list[dict], list[str]]:
+    """Everything `restore --all` decides, before anything is printed or typed.
+
+    Returns (pairs, create, reported, notes): live windows to fill, snapshot
+    windows to rebuild in new windows, snapshot windows to only report, and
+    the reasons for what was left alone.
+
+    The launcher -- the window this runs in -- is never paired. One of its tabs
+    is the one being typed in, which restore never types into, so pairing it
+    always left that snapshot window part-restored; and a freshly opened
+    window could pair with an unrelated one. Excluding it also stops it from
+    blocking --create-missing.
+    """
+    candidates = [t for t in live if t["window_index"] != launcher]
+    pairs, unmatched, notes = match_all(snap, candidates)
+
+    if launcher is not None and resembles_snapshot(snap, live, launcher):
+        notes.append(
+            f"live window {launcher} (the one you are in) was not paired: restore "
+            "never types into the window it runs from. "
+            + (
+                "Where nothing else matches its snapshot window, it is rebuilt in "
+                "a new window below."
+                if create_missing
+                else "Open a new window (Cmd-N) and run this again to restore it; "
+                "anything already running is skipped."
+            )
+        )
+
+    create: list[dict] = []
+    refused: dict[int, str] = {}
+    if create_missing:
+        create, refused = creatable(snap, candidates, pairs, unmatched)
+        notes += list(refused.values())
+    reported = [
+        w for w in unmatched if w not in create and w["window_index"] not in refused
+    ]
+    return pairs, create, reported, notes
 
 
 def plan(
