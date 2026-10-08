@@ -31,7 +31,8 @@ INSTANCES = 600
 
 # Written independently of restore.GENERIC_TITLES on purpose: a title that is
 # only a shell name identifies no window, so it is not evidence.
-SHELL_NAMES = {"zsh", "-zsh", "bash", "-bash", "sh", "-sh", "fish", "-fish", "login"}
+_SHELLS = ("zsh", "bash", "sh", "fish", "tcsh", "csh", "ksh", "dash", "login")
+SHELL_NAMES = {name for base in _SHELLS for name in (base, f"-{base}")}
 
 
 def titles(window):
@@ -88,7 +89,7 @@ def random_instance(rnd):
             if roll < 0.12:
                 return rnd.choice([" ", ""])
             if roll < 0.25:
-                return rnd.choice(["-zsh", "zsh", "bash"])  # shell names: not evidence
+                return rnd.choice(sorted(SHELL_NAMES))  # shell names: not evidence
             return rnd.choice(alphabet)
         return [title() for _ in range(rnd.randint(1, 4))]
 

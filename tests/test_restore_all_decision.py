@@ -32,7 +32,9 @@ def live(*windows):
 
 
 def decide(s, l, launcher, create_missing=False):
-    pairs, create, reported, notes = restore.decide_restore_all(s, l, launcher, create_missing)
+    pairs, create, reported, notes, _ = restore.decide_restore_all(
+        s, l, launcher, create_missing
+    )
     return (sorted((w, m["window_index"]) for w, m in pairs),
             [w["window_index"] for w in create],
             [w["window_index"] for w in reported], notes)
@@ -93,6 +95,38 @@ def test_without_a_launcher_every_window_is_a_candidate():
     s = snap(["web"], ["api"])
     pairs, _, _, _ = decide(s, live(["web"], ["api"]), launcher=None)
     assert pairs == [(1, 1), (2, 2)], pairs
+
+
+def test_would_create_matches_what_create_missing_actually_does():
+    """Copilot round 3: a hint promised --create-missing would rebuild "every"
+    unmatched window, while it deliberately refuses ones a live window might
+    be. The hint now names would_create, so it must equal the real outcome."""
+    s = snap(["notes", "a"], ["notes", "b"], ["solo"], ["other"])
+    l = live(["-zsh"], ["notes"])
+    _, _, reported, _, would = restore.decide_restore_all(s, l, 1, False)
+    _, create, _, _, would_again = restore.decide_restore_all(s, l, 1, True)
+    assert would == [w["window_index"] for w in create] == would_again == [3, 4], (
+        would, [w["window_index"] for w in create])
+    assert sorted(w["window_index"] for w in reported) == [1, 2, 3, 4]
+
+
+def test_a_refused_window_gets_commands_that_work():
+    # "restore N" alone, run from the wrong window, part-restores again.
+    s = snap(["notes", "a"], ["notes", "b"])
+    _, _, _, notes, _ = restore.decide_restore_all(s, live(["-zsh"], ["notes"]), 1, True)
+    refusal = next(n for n in notes if "not rebuilt" in n)
+    assert "from a new tab in that window" in refusal, refusal
+    assert "--new-window --go" in refusal, refusal
+
+
+def test_every_canonical_shell_is_not_evidence():
+    """Copilot round 3: the list was a copy missing tcsh, csh, ksh and dash."""
+    from agent_tabs import procs
+    for base in procs.SHELL_NAMES | procs.LOGIN_NAMES:
+        for title in (base, f"-{base}"):
+            s = snap(["web", title])
+            pairs, create, _, _, _ = restore.decide_restore_all(s, live([title]), None, False)
+            assert pairs == [], f"paired on the shell title {title!r}"
 
 
 if __name__ == "__main__":
