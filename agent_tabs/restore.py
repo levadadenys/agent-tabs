@@ -439,7 +439,7 @@ def creatable(
         if index in contested:
             who = ", ".join(f"live window {w}" for w in contested[index])
             refused[index] = (
-                f"snapshot window {index}: not rebuilt, {who} might be it. "
+                f"snapshot window {index}: not restored, {who} might be it. "
                 f"If it is, run  agent-tabs restore {index}  from a new tab in "
                 f"that window; if not,  agent-tabs restore {index} --new-window --go"
             )
@@ -461,14 +461,37 @@ def decide_restore_all(
 
     The launcher -- the window this runs in -- is never paired. One of its tabs
     is the one being typed in, which restore never types into, so pairing it
-    always left that snapshot window part-restored; and a freshly opened
-    window could pair with an unrelated one. Excluding it also stops it from
-    blocking --create-missing.
-    """
-    candidates = [t for t in live if t["window_index"] != launcher]
-    pairs, unmatched, notes = match_all(snap, candidates)
+    always left that snapshot window part-restored. It still takes part in the
+    matching, and only its own pairing is dropped afterwards: left out, its
+    snapshot window was up for grabs, and a window sharing a single title with
+    it took it -- typing the launcher's sessions into an unrelated window. The
+    launcher never blocks --create-missing.
 
-    if launcher is not None and resembles_snapshot(snap, live, launcher):
+    A snapshot window some unpaired live window might be is reported with
+    commands that work either way, with or without --create-missing: "no live
+    window matched" would be false, and its rebuild command a duplicate.
+    """
+    pairs, unmatched, notes = match_all(snap, live)
+    mine: dict | None = None
+    if launcher is not None:
+        own = f"live window {launcher}:"
+        notes = [n for n in notes if not n.startswith(own)]
+        mine = next((w for index, w in pairs if index == launcher), None)
+        pairs = [(index, w) for index, w in pairs if index != launcher]
+
+    if mine is not None:
+        notes.append(
+            f"live window {launcher} (the one you are in) is snapshot window "
+            f"{mine['window_index']}, but restore never types into the window it "
+            "runs from. "
+            + (
+                "It is rebuilt in a new window below."
+                if create_missing
+                else "Open a new window (Cmd-N) and run this again to restore it; "
+                "anything already running is skipped."
+            )
+        )
+    elif launcher is not None and resembles_snapshot(snap, live, launcher):
         notes.append(
             f"live window {launcher} (the one you are in) was not paired: restore "
             "never types into the window it runs from. "
@@ -481,13 +504,18 @@ def decide_restore_all(
             )
         )
 
-    would, would_refuse = creatable(snap, candidates, pairs, unmatched)
+    candidates = [t for t in live if t["window_index"] != launcher]
+    would, refused = creatable(snap, candidates, pairs, unmatched)
+    if mine is not None:
+        # Not run through creatable: the launcher was the forced match, so no
+        # other window that overlaps it can be it.
+        would = sorted(would + [mine], key=lambda w: w["window_index"])
     would_create = [w["window_index"] for w in would]
     create: list[dict] = would if create_missing else []
-    refused: dict[int, str] = would_refuse if create_missing else {}
     notes += list(refused.values())
     reported = [
-        w for w in unmatched if w not in create and w["window_index"] not in refused
+        w for w in unmatched
+        if w not in create and w["window_index"] not in refused
     ]
     return pairs, create, reported, notes, would_create
 
@@ -578,8 +606,11 @@ def execute(actions: list[Action], window_id: str, force: bool = False) -> int:
     # The plan's duplicate check is a snapshot: a session resumed by hand, or
     # by another restore, after planning would otherwise start twice. Check
     # again immediately before typing. --force does not override this.
-    started_since = running_sessions()
-
+    runnable = _not_started_since(runnable, running_sessions())
+    if not runnable:
+        return 0
+    # Only as many tabs as will be typed into: not blank ones for sessions
+    # that turned out to be running already.
     ensure_tabs(window_id, max(a.tab_index for a in runnable))
 
     busy_now: set[int] = set()
@@ -593,12 +624,6 @@ def execute(actions: list[Action], window_id: str, force: bool = False) -> int:
 
     ran = 0
     for action in runnable:
-        if action.session_id and action.session_id in started_since:
-            print(
-                f"  tab {action.tab_index:>2}  SKIP (session started in "
-                f"{started_since[action.session_id]} since the plan)"
-            )
-            continue
         if action.tab_index in busy_now:
             print(f"  tab {action.tab_index:>2}  SKIP (became busy since the plan)")
             continue
@@ -610,7 +635,25 @@ def execute(actions: list[Action], window_id: str, force: bool = False) -> int:
     return ran
 
 
-class RestoreInProgress(RuntimeError):
+def _not_started_since(runnable: list[Action], running: dict[str, str]) -> list[Action]:
+    """Drop, and report, actions whose session started since planning."""
+    remaining = []
+    for action in runnable:
+        if action.session_id and action.session_id in running:
+            print(
+                f"  tab {action.tab_index:>2}  SKIP (session started in "
+                f"{running[action.session_id]} since the plan)"
+            )
+        else:
+            remaining.append(action)
+    return remaining
+
+
+class RestoreLockError(RuntimeError):
+    """The restore lock could not be taken; nothing was typed."""
+
+
+class RestoreInProgress(RestoreLockError):
     """Another `restore --go` holds the lock."""
 
 
@@ -623,8 +666,14 @@ def restore_lock():
     so a crashed restore cannot leave a stale lock behind.
     """
     lock_path = snap_mod.STATE_DIR / "restore.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    handle = open(lock_path, "w")
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        handle = open(lock_path, "w")
+    except OSError as exc:
+        raise RestoreLockError(
+            f"Cannot take the restore lock {lock_path}: {exc.strerror or exc}. "
+            "Nothing was typed."
+        ) from exc
     try:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -643,11 +692,20 @@ def restore_into_new_window(actions: list[Action], force: bool = False) -> int:
 
     The window's id is captured by the script that creates it, so focusing
     another window meanwhile cannot redirect the restore.
+
+    Running sessions are re-checked before the window is created, not only
+    when typing: if every one was started since the plan, a new window would
+    sit there empty. execute() checks again, for anything started meanwhile.
     """
     runnable = [a for a in actions if a.will_run]
     if not runnable:
         return 0
-    window_id = iterm.create_window(max(a.tab_index for a in runnable))
+    started = running_sessions()
+    remaining = [a for a in runnable if not (a.session_id and a.session_id in started)]
+    if not remaining:
+        _not_started_since(runnable, started)  # reports each skip
+        return 0
+    window_id = iterm.create_window(max(a.tab_index for a in remaining))
     return execute(actions, window_id, force)
 
 
