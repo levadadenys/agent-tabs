@@ -102,8 +102,9 @@ an issue.
 - Restore is a dry run by default; `--go` is explicit.
 - Never type into a tab holding live work, and never into the tab the command
   runs from. Liveness is re-checked at execute time, not just at plan time.
-- Never start a session that is already running anywhere. `--force` does not
-  override this.
+- Never start a session that is already running anywhere, or twice in one
+  restore. Check at planning time AND immediately before typing, and hold
+  `restore_lock()` around any `--go`. `--force` does not override this.
 - Never replay a recorded command line containing shell syntax.
 - Target windows by iTerm's window **id**, never its index: the index is
   front-to-back position and changes whenever a window is focused.
@@ -119,4 +120,5 @@ an issue.
 - Never let a capture with no agent sessions overwrite a good snapshot, nor a
   collapsed one until the drop has persisted.
 - Keep the pre-reboot snapshot recoverable: `pre-boot.json` is pinned on the
-  first promotion after each boot, tagged with that boot.
+  first promotion after each boot, tagged with that boot, falling back to the
+  fullest pre-boot capture in history when `snapshot.json` cannot be used.

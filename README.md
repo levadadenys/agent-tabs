@@ -146,9 +146,11 @@ Restore types into live shells, so it is conservative by default:
   Override with `--force`. It also never types into the tab it runs from.
   Liveness is checked again immediately before typing, not only when planning.
 - **Never starts a session that is already running** anywhere, in any window
-  — nor twice in one restore, if the snapshot lists it in two tabs. `--force`
-  does not override this: it is about busy tabs, and a duplicate session is
-  never wanted.
+  — nor twice in one restore, if the snapshot lists it in two tabs. This is
+  checked when planning and again immediately before typing, so a session you
+  resume by hand in the meantime is skipped. Only one `restore --go` runs at a
+  time; a second one stops and tells you. `--force` does not override any of
+  this: it is about busy tabs, and a duplicate session is never wanted.
 - **Never replays shell syntax.** A recorded command line containing it is
   reported and downgraded to a bare `cd`, because argv is data any local process
   controls and restore can run unattended.
@@ -196,7 +198,10 @@ snapshot matters most is a shutdown, when tabs die one at a time:
   a tab or two is promoted immediately.
 
 **Across a reboot**, the first promotion after boot copies the outgoing snapshot
-to `pre-boot.json`. That matters if iTerm restored nothing and you started a
+to `pre-boot.json`. If `snapshot.json` cannot be read at that moment, the
+fullest capture from before the reboot still in history is pinned instead — not
+simply the newest, since the last captures before a reboot are half-dead ones
+from the shutdown. That matters if iTerm restored nothing and you started a
 session before restoring: that small capture replaces `snapshot.json` about a
 minute later, and history rotates the full one out within half an hour. When
 that has happened, `list` and `restore` say so and print the command to restore
