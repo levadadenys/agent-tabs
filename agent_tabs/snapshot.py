@@ -109,31 +109,75 @@ def captured_at(snap: dict) -> datetime | None:
     return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
 
 
-def _pin_pre_boot(incoming: dict) -> None:
-    """Keep the pre-reboot snapshot before a post-reboot one replaces it.
+def _pinned_for(booted: datetime) -> bool:
+    try:
+        return json.loads(PRE_BOOT.read_text()).get("pinned_for_boot") == booted.isoformat()
+    except (json.JSONDecodeError, OSError, AttributeError):
+        return False
 
-    Runs on promotion. The first promotion after a boot is the one that would
-    overwrite the pre-reboot fleet, so that is the moment to copy it aside. A
-    failure here must never block a capture.
+
+def _fullest_pre_boot_archive(booted: datetime) -> dict | None:
+    """The pre-reboot capture with the most agent sessions still in history.
+
+    Not simply the newest: during shutdown, tabs die one at a time, so the last
+    captures before a reboot are half-dead ones -- archived, never promoted.
+    Picking the newest would pin 3 sessions instead of 22.
+    """
+    best, best_count = None, 0
+    for archive in sorted(HISTORY_DIR.glob("*.json"), reverse=True):
+        try:
+            snap = json.loads(archive.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        # The capture's own time, as everywhere else in the pin logic; the
+        # filename is only the save time, and the two must not disagree.
+        when = captured_at(snap) or _archive_time(archive)
+        if when is None or when >= booted:
+            continue
+        count = agent_tab_count(snap)
+        if count > best_count:  # strict: on a tie the newer one, seen first, wins
+            best, best_count = snap, count
+    return best
+
+
+def _pin_pre_boot(incoming: dict) -> None:
+    """Keep the pre-reboot fleet recoverable once a post-reboot capture lands.
+
+    Runs on promotion. Pins once per boot, preferring snapshot.json when it
+    still holds the pre-reboot state. When it cannot -- unreadable, or already
+    replaced because an earlier pin failed -- history may still hold the
+    pre-reboot fleet, but only for about half an hour before it rotates out,
+    so that is pinned instead rather than lost. A failure here must never
+    block a capture.
     """
     booted = boot_time()
-    if booted is None or not LATEST.exists():
+    if booted is None:
         return
+    after = captured_at(incoming)
+    if after is None or after < booted:
+        return  # still before this boot: nothing to protect yet
+    if _pinned_for(booted):
+        return  # already pinned for this boot
+
+    candidate = None
     try:
         current = json.loads(LATEST.read_text())
+        taken = captured_at(current)
+        if taken is not None and taken < booted:
+            candidate = current
     except (json.JSONDecodeError, OSError):
+        pass
+    if candidate is None:
+        candidate = _fullest_pre_boot_archive(booted)
+    if candidate is None:
         return
-    before, after = captured_at(current), captured_at(incoming)
-    if before is None or after is None:
-        return
-    if before < booted <= after:
-        # Record which boot this pin belongs to. A pre-boot.json left from an
-        # earlier reboot must never be offered as "the last one before the
-        # reboot" -- it would point a restore at an ancient fleet.
-        try:
-            _write_atomic(PRE_BOOT, {**current, "pinned_for_boot": booted.isoformat()})
-        except OSError:
-            pass
+    # Record which boot this pin belongs to. A pre-boot.json left from an
+    # earlier reboot must never be offered as "the last one before the
+    # reboot" -- it would point a restore at an ancient fleet.
+    try:
+        _write_atomic(PRE_BOOT, {**candidate, "pinned_for_boot": booted.isoformat()})
+    except OSError:
+        pass
 
 
 def pre_boot_warning(snap: dict) -> str | None:
