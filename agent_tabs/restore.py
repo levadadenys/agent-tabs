@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
+from contextlib import contextmanager
 from functools import lru_cache
 from dataclasses import dataclass
 
@@ -25,6 +27,7 @@ class Action:
     kind: str
     command: str
     skip_reason: str | None = None
+    session_id: str | None = None
 
     @property
     def will_run(self) -> bool:
@@ -526,9 +529,12 @@ def plan(
             # Extra panes in a split tab are recorded but not recreated.
             continue
         seen_tabs.add(index)
-        action = Action(index, tab.get("title") or "", tab.get("kind") or "", tab.get("restore") or "")
-        existing = busy.get(index)
         session = tab.get("session_id")
+        action = Action(
+            index, tab.get("title") or "", tab.get("kind") or "",
+            tab.get("restore") or "", session_id=session,
+        )
+        existing = busy.get(index)
         if not action.command:
             action.skip_reason = "nothing recorded"
         elif session and session in running:
@@ -569,6 +575,11 @@ def execute(actions: list[Action], window_id: str, force: bool = False) -> int:
     if not any(t["window_id"] == window_id for t in iterm.enumerate_tabs()):
         print(f"  window {window_id} is gone; nothing typed into it")
         return 0
+    # The plan's duplicate check is a snapshot: a session resumed by hand, or
+    # by another restore, after planning would otherwise start twice. Check
+    # again immediately before typing. --force does not override this.
+    started_since = running_sessions()
+
     ensure_tabs(window_id, max(a.tab_index for a in runnable))
 
     busy_now: set[int] = set()
@@ -582,6 +593,12 @@ def execute(actions: list[Action], window_id: str, force: bool = False) -> int:
 
     ran = 0
     for action in runnable:
+        if action.session_id and action.session_id in started_since:
+            print(
+                f"  tab {action.tab_index:>2}  SKIP (session started in "
+                f"{started_since[action.session_id]} since the plan)"
+            )
+            continue
         if action.tab_index in busy_now:
             print(f"  tab {action.tab_index:>2}  SKIP (became busy since the plan)")
             continue
@@ -591,6 +608,34 @@ def execute(actions: list[Action], window_id: str, force: bool = False) -> int:
         iterm.run_in_tab(window_id, action.tab_index, action.command)
         ran += 1
     return ran
+
+
+class RestoreInProgress(RuntimeError):
+    """Another `restore --go` holds the lock."""
+
+
+@contextmanager
+def restore_lock():
+    """Serialise restores that type into tabs.
+
+    Two at once would each plan before the other starts anything, and both
+    could start the same session. flock is released when the process exits,
+    so a crashed restore cannot leave a stale lock behind.
+    """
+    lock_path = snap_mod.STATE_DIR / "restore.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    handle = open(lock_path, "w")
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise RestoreInProgress(
+                "Another `agent-tabs restore --go` is running. Wait for it to "
+                "finish, then run this again: anything it started will be skipped."
+            ) from exc
+        yield
+    finally:
+        handle.close()
 
 
 def restore_into_new_window(actions: list[Action], force: bool = False) -> int:
