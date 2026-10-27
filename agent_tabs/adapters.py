@@ -19,8 +19,19 @@ UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
 
 # Characters that make a shell do something other than run one command. A
 # recorded command line is replayed verbatim, so anything carrying these is not
-# safe to type into a shell unattended.
-SHELL_METACHARACTERS = set(";&|<>`$()\n\r\\!*?{}[]\"'")
+# safe to type into a shell unattended. `~`, `^` and `#` are zsh's: tilde
+# expansion, and glob operators anywhere in a word under extendedglob (`#` also
+# starts a comment).
+SHELL_METACHARACTERS = set(";&|<>`$()\n\r\\!*?{}[]\"'~^#")
+
+
+def _has_shell_syntax(command: str) -> bool:
+    # A word starting with `=` is zsh's path expansion (`=ls` is /bin/ls). Only
+    # at the start of a word: `--port=3000` must still replay.
+    return bool(set(command) & SHELL_METACHARACTERS) or any(
+        word.startswith("=") for word in command.split()
+    )
+
 
 HOME = Path.home()
 CLAUDE_SESSIONS = HOME / ".claude" / "sessions"
@@ -147,7 +158,7 @@ def resolve_command(proc: procs.Proc, cwd: str | None) -> dict:
     arbitrary process controls and this runs unattended, long after capture.
     """
     kind = "ssh" if proc.argv0 == "ssh" else "command"
-    if set(proc.command) & SHELL_METACHARACTERS:
+    if _has_shell_syntax(proc.command):
         result = _result(kind, None, cwd, "")
         note = (
             "command contains shell syntax and was not replayed; "
