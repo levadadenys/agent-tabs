@@ -7,8 +7,8 @@ conversation. What it loses is the **grouping**: which session was in which
 iTerm window and tab, and in what working directory. Nothing records that, so
 recovery normally means guessing from file timestamps.
 
-`agent-tabs` records the grouping every 30 seconds while you work, and replays it
-afterwards.
+`agent-tabs` records the grouping every 30 seconds (configurable) while you work,
+and replays it afterwards.
 
 ## After a crash or reboot
 
@@ -61,7 +61,8 @@ cd agent-tabs && ./bin/agent-tabs install
 
 That:
 
-- installs the recorder as a **launchd agent**, capturing every 30 seconds;
+- installs the recorder as a **launchd agent**, capturing every 30 seconds by
+  default (see [Config](#config));
 - links `agent-tabs` into `~/.local/bin`;
 - links a `resume-tabs` skill into `~/.claude/skills`, so you can ask Claude to
   restore your tabs.
@@ -95,7 +96,7 @@ rm -rf ~/.agent-tabs                                  # snapshots and history
 ## Commands
 
 ```bash
-agent-tabs snapshot                       # capture now (the recorder does this every 30s)
+agent-tabs snapshot                       # capture now (the recorder does this every 30s by default)
 agent-tabs list                           # what the snapshot holds, with restore commands
 agent-tabs list --kind codex              # only one kind of tab (filters on kind, not title)
 agent-tabs list --commands                # bare restore commands, one per line
@@ -190,7 +191,8 @@ command for either case, rather than as unmatched.
 ## Snapshots and reboots
 
 - `~/.agent-tabs/snapshot.json` — the snapshot `list` and `restore` use
-- `~/.agent-tabs/history/` — the last 60 captures, about half an hour
+- `~/.agent-tabs/history/` — every capture from the last half hour, never fewer
+  than the newest 60 (so a long sleep does not empty it), at most 180
 - `~/.agent-tabs/pre-boot.json` — the last snapshot from before the most recent reboot
 - `~/.agent-tabs/recorder.log` — recorder errors
 
@@ -211,7 +213,7 @@ last captures before a reboot are half-dead ones from the shutdown, and one
 can reach `snapshot.json` if the shutdown drags on. Not history alone either:
 after a long idle spell it may no longer hold the fleet. That matters if iTerm restored nothing and you started a
 session before restoring: that small capture replaces `snapshot.json` about a
-minute later, and history rotates the full one out within half an hour. When
+minute later, and history rotates the full one out after about half an hour. When
 that has happened, `list` and `restore` say so and print the command to restore
 the pre-reboot fleet instead:
 
@@ -264,8 +266,21 @@ command that selects that Codex account, for people running more than one:
 {"codex_profiles": {"/Users/you/.codex-work": "codex work"}}
 ```
 
-Without an entry, Codex is resumed with plain `codex`. `AGENT_TABS_HOME`
-relocates `~/.agent-tabs`, mainly for testing.
+Without an entry, Codex is resumed with plain `codex`.
+
+`interval_seconds` sets how often the recorder captures, from 10 to 300
+(default 30). A shorter interval loses fewer sessions in a crash and costs more
+CPU: one capture takes about 2 s with two dozen sessions. Run `agent-tabs
+install` again to apply a change; it says which interval the recorder now runs
+at, and corrects a value out of range or not a whole number:
+
+```json
+{"interval_seconds": 60}
+```
+
+History is kept by age, not count: the last half hour at any interval, and
+never fewer than 60 captures, so at a long interval it reaches further back (at
+300 s, about 5 hours). `AGENT_TABS_HOME` relocates `~/.agent-tabs`, mainly for testing.
 
 ## Limits
 

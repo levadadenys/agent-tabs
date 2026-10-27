@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from runner import run
 
-from agent_tabs import install
+from agent_tabs import config, install
 
 
 class Sandbox:
@@ -102,7 +102,7 @@ def test_a_successful_load_removes_the_legacy_recorder():
 
 def test_a_running_legacy_recorder_is_stopped():
     # Unlinking the script does not stop a process iTerm already started; both
-    # would then capture every 30s and race on snapshot.json.
+    # would then capture on its own timer and race on snapshot.json.
     import subprocess
     import time
 
@@ -235,6 +235,108 @@ def test_a_line_separator_cannot_get_another_process_signalled():
             install.LEGACY_AUTOLAUNCH = original
             holder.kill()
             decoy.kill()
+
+
+def interval_written(raw: "str | None") -> "tuple[int, list[str]]":
+    """Install with this config.json text (None: no file); return the plist's
+    StartInterval and install's output lines. The real plist builder, with
+    config redirected so the real ~/.agent-tabs/config.json is never read."""
+    import plistlib
+
+    with Sandbox(0) as root:
+        original = config.CONFIG_PATH
+        config.CONFIG_PATH = root / "config.json"
+        if raw is not None:
+            config.CONFIG_PATH.write_bytes(raw.encode("utf-8", "surrogateescape"))
+        try:
+            lines, _ = install._install_agent()
+            interval = plistlib.loads(install.AGENT_PLIST.read_bytes())["StartInterval"]
+            return interval, lines
+        finally:
+            config.CONFIG_PATH = original
+
+
+def test_the_interval_setting_reaches_the_plist_clamped():
+    # (config.json, StartInterval written, whether install says it changed it)
+    cases = (
+        ('{"interval_seconds": 60}', 60, False),
+        ('{"interval_seconds": 5}', 10, True),
+        ('{"interval_seconds": 0}', 10, True),
+        ('{"interval_seconds": -5}', 10, True),
+        ('{"interval_seconds": 9999}', 300, True),
+        ('{"interval_seconds": true}', 30, True),
+        ('{"interval_seconds": 60.0}', 30, True),
+        ('{"interval_seconds": NaN}', 30, True),
+        ('{"interval_seconds": "60"}', 30, True),
+        ('{"interval_seconds": "abc"}', 30, True),
+        ('{"interval_seconds": null}', 30, True),
+        ('{"interval_seconds": []}', 30, True),
+    )
+    long_value = '{"interval_seconds": "' + "x" * 5000 + '"}'
+    _, lines = interval_written(long_value)
+    assert all(len(line) < 200 for line in lines), "a long value is echoed in full"
+    for raw, expected, noted in cases:
+        interval, lines = interval_written(raw)
+        assert interval == expected, (raw, interval)
+        assert f"recorder loaded, every {expected}s" in lines, (raw, lines)
+        notes = [line for line in lines if "interval_seconds" in line]
+        assert len(notes) == int(noted), (raw, lines)
+
+
+def test_a_missing_or_damaged_config_never_breaks_install():
+    # Missing: the default, silently. Present but unreadable: the default, and
+    # a note, or every setting in it would be dropped without a word.
+    for raw, noted in (
+        (None, False),
+        ("{}", False),
+        ("\udcff\udcfe", True),
+        ("\ufeff" + '{"interval_seconds": 60}', True),
+        ("5", True),
+        ("null", True),
+        ("[1, 2]", True),
+        ("not json", True),
+        ("[" * 100000, True),
+    ):
+        interval, lines = interval_written(raw)
+        assert interval == 30, (raw[:20] if raw else raw, interval)
+        notes = [line for line in lines if "interval_seconds" in line]
+        assert len(notes) == int(noted), (raw[:20] if raw else raw, lines)
+
+
+def test_an_unreadable_state_directory_never_breaks_install():
+    # Python 3.9's Path.exists() raises PermissionError here; 3.14's does not.
+    with tempfile.TemporaryDirectory() as tmp:
+        locked = Path(tmp) / "locked"
+        locked.mkdir()
+        original = config.CONFIG_PATH
+        config.CONFIG_PATH = locked / "config.json"
+        locked.chmod(0)
+        try:
+            interval, note = config.interval_seconds()
+            assert interval == 30 and note and "could not be read" in note, note
+            assert config.codex_command("/x") == "codex"
+        finally:
+            locked.chmod(0o700)
+            config.CONFIG_PATH = original
+
+
+def test_a_recorder_left_alone_says_it_keeps_its_old_interval():
+    # A loaded job with no plist on disk is never torn down (nothing to put
+    # back), so the new interval does not apply until the next install.
+    with Sandbox(0) as root:
+        original = config.CONFIG_PATH
+        config.CONFIG_PATH = root / "config.json"
+        config.CONFIG_PATH.write_text('{"interval_seconds": 60}')
+        install._launchctl = lambda *a: subprocess.CompletedProcess(
+            a, 0 if a[0] == "print" else 1, "", "already loaded"
+        )
+        try:
+            lines, loaded = install._install_agent()
+        finally:
+            config.CONFIG_PATH = original
+        assert loaded
+        assert any("keeps its old interval, not 60s" in line for line in lines), lines
+        assert not any(line.startswith("recorder loaded, every") for line in lines), lines
 
 
 if __name__ == "__main__":

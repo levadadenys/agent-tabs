@@ -1,6 +1,6 @@
 """snapshot.save() must never let a degraded capture destroy a good one.
 
-This is the tool's core safety property: the recorder fires every 30s, and a
+This is the tool's core safety property: the recorder fires every 30s by default, and a
 capture taken while iTerm is shutting down sees no agents. If that were
 promoted, the last good snapshot would be gone at exactly the moment it is
 needed. Driven through the real save/load/history call sites -- the bug this
@@ -8,9 +8,11 @@ guards against is filesystem state, so there is nothing worth mocking.
 """
 
 import importlib
+import json
 import os
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -84,16 +86,98 @@ def test_agent_count_ignores_non_agent_tabs():
         assert m.agent_tab_count(snap_with(2)) == 2
 
 
-def test_history_is_capped_and_each_capture_is_distinct():
+def test_each_capture_is_archived_under_its_own_name():
     with tempfile.TemporaryDirectory() as tmp:
         m = fresh_module(Path(tmp))
-        m.HISTORY_KEEP = 5
         for i in range(12):
             m.save(snap_with(1, f"c{i}"))
-        files = list(m.HISTORY_DIR.glob("*.json"))
-        assert len(files) == 5, f"expected 5 archives, found {len(files)}"
         # Same-second captures must not collide into one filename.
-        assert len({f.name for f in files}) == 5
+        assert len(list(m.HISTORY_DIR.glob("*.json"))) == 12
+
+
+def archive_at(m, seconds_ago: float) -> Path:
+    """A history archive named as save() would have named it, that long ago."""
+    when = datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
+    path = m.HISTORY_DIR / f"{when.strftime('%Y%m%dT%H%M%S%f')}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(snap_with(1)))
+    return path
+
+
+def test_history_keeps_about_half_an_hour_at_30_seconds():
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh_module(Path(tmp))
+        old = [archive_at(m, 30 * k) for k in range(1, 241)]  # two hours of captures
+        _, new = m.save(snap_with(1))
+        kept = set(m.HISTORY_DIR.glob("*.json"))
+        assert new in kept
+        # The archive exactly 30 minutes old has aged out by the time save() prunes.
+        assert kept - {new} == set(old[:59]), f"kept {len(kept)}: not the last half hour"
+
+
+def test_the_cap_holds_when_captures_come_fast():
+    # 5 s apart: 359 archives inside the window, so the cap, not the window,
+    # decides. (At exactly 10 s the window alone lands on 180.)
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh_module(Path(tmp))
+        old = [archive_at(m, 5 * k) for k in range(1, 721)]
+        _, new = m.save(snap_with(1))
+        kept = set(m.HISTORY_DIR.glob("*.json"))
+        assert len(kept) == m.HISTORY_CAP == 180, f"kept {len(kept)}"
+        assert kept == {new, *old[:179]}, "the cap must drop the oldest"
+
+
+def test_a_long_gap_keeps_the_floor():
+    # After a long sleep every archive is older than the window; age alone
+    # would delete the whole pre-sleep history on the first capture.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh_module(Path(tmp))
+        old = [archive_at(m, 3 * 3600 + 30 * k) for k in range(100)]
+        _, new = m.save(snap_with(1))
+        kept = set(m.HISTORY_DIR.glob("*.json"))
+        # save() archives before it prunes, so the new capture takes one slot.
+        assert kept == {new, *old[:59]}, f"kept {len(kept)}"
+
+
+def test_an_unparseable_name_is_kept_only_within_the_floor():
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh_module(Path(tmp))
+        junk = m.HISTORY_DIR / "not-a-time.json"
+        junk.parent.mkdir(parents=True, exist_ok=True)
+        junk.write_text(json.dumps(snap_with(1)))
+        for k in range(5):
+            archive_at(m, 3 * 3600 + k)
+        m.save(snap_with(1))
+        assert junk.exists(), "within the floor, an unreadable name is kept"
+        for k in range(70):
+            archive_at(m, 3 * 3600 + 100 + k)
+        m.save(snap_with(1))
+        assert not junk.exists(), "it sorts oldest, so it goes first"
+
+
+def test_a_clock_jump_back_never_deletes_the_capture_just_written():
+    # After the clock goes back, every archive from the "lost" stretch is
+    # dated later than the new capture. With enough of them to fill the cap,
+    # dropping the oldest by time would drop the capture just written.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh_module(Path(tmp))
+        for k in range(200):
+            archive_at(m, -3600 - k)
+        _, new = m.save(snap_with(1))
+        assert new.exists(), "the capture just written was pruned"
+
+
+def test_a_future_dated_archive_does_not_cost_real_new_captures():
+    # The clock went back: an archive from "tomorrow" sorts newest. The cap
+    # must still drop the oldest real captures, not the new ones.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh_module(Path(tmp))
+        future = archive_at(m, -86400)
+        old = [archive_at(m, 5 * k) for k in range(1, 201)]
+        _, new = m.save(snap_with(1))
+        kept = set(m.HISTORY_DIR.glob("*.json"))
+        assert len(kept) == 180 and future in kept and new in kept
+        assert set(old[:178]) <= kept, "a newer real capture was dropped"
 
 
 def test_load_without_a_snapshot_explains_itself():
