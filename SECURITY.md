@@ -4,9 +4,9 @@
 
 `~/.agent-tabs/` (or `$AGENT_TABS_HOME`) holds snapshots and their history: for every iTerm tab,
 its working directory, title, the command line of the process running in it, and agent session
-ids. A command line can contain a credential that another program was given on its argv. Snapshot
-and history files are created owner-only (`0600`), and so is `history/`; `install` creates
-`~/.agent-tabs` owner-only.
+ids. A command line can contain a credential that another program was given on its argv. The
+directory and `history/` are kept owner-only (`0700`): every capture corrects them if they are
+not. Snapshot files are created owner-only (`0600`).
 
 Nothing leaves the machine: agent-tabs makes no network connections.
 
@@ -25,8 +25,9 @@ Any local process controls its own argv and working directory, so:
   recorded command line, replayed as it was**, unless it contains shell syntax, in which case it
   is reported and downgraded to the bare `cd`.
 
-The shell-syntax filter rejects shell metacharacters, so a recorded line cannot chain or
-substitute commands. It does not check what the program is: treat every listed command as one the
+The shell-syntax filter rejects shell metacharacters, zsh's included (`~`, `^`, `#`, and `=` at
+the start of a word), so a recorded line can neither chain or substitute commands nor expand into
+different arguments. It does not check what the program is: treat every listed command as one the
 recording process chose. That is why restore is a dry run by default. **Read the plan before
 `--go`**; it shows exactly what will be typed.
 
@@ -34,7 +35,7 @@ Where it types:
 
 - never into a tab running something, unless you pass `--force`;
 - never into the tab it runs from. It finds that tab from its own terminal; run without one (from
-  a script, say), it cannot, and only the busy check above protects that tab;
+  a script, say), it cannot, so `--go --force` is refused there;
 - never a session already running in any iTerm pane, `--force` or not.
 
 Busy tabs and running sessions are read again just before typing starts, so the plan is not
