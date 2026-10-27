@@ -83,6 +83,7 @@ def test_zsh_expansions_are_not_replayed():
         "git log HEAD^",
         "grep x# file",
         "ssh host #rest",
+        "tail x==ls",
     ):
         got = adapters.resolve_command(proc(hostile), "/home/me")
         assert got["restore"] == "cd /home/me", (hostile, got["restore"])
