@@ -149,6 +149,20 @@ def test_an_old_snapshot_is_filtered_again_when_planning():
     assert actions[2].command == "cd /srv && ssh box", "a plain line must still replay"
 
 
+def test_a_line_capture_could_not_have_written_types_only_the_cd():
+    # Capture always writes `cd <cwd> && <command>`; a command line without
+    # that prefix did not come from it, metacharacters or not.
+    from agent_tabs import adapters
+
+    for restore_line in ("rm -rf build", "cd /elsewhere"):
+        tab = {"kind": "command", "cwd": "/srv", "restore": restore_line}
+        command, note = adapters.checked_restore(tab)
+        assert command == "cd /srv", (restore_line, command)
+        assert note and restore_line in note
+    spaced = {"kind": "ssh", "cwd": "/a b", "restore": "cd '/a b' && ssh box"}
+    assert adapters.checked_restore(spaced) == ("cd '/a b' && ssh box", None)
+
+
 if __name__ == "__main__":
     import traceback
 
