@@ -6,8 +6,8 @@ import os
 import plistlib
 import signal
 import subprocess
-import time
 import sys
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
