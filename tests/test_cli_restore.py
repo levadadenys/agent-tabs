@@ -172,6 +172,41 @@ def test_go_force_without_a_terminal_types_nothing():
         assert rec.started() == ["s1"], "setup: without --force, the restore runs"
 
 
+def test_a_plan_time_downgrade_is_shown_with_the_original():
+    # An older snapshot's line that today's filter rejects is typed as a bare
+    # cd; the plan must say so and keep the original, as a capture would.
+    import contextlib
+    import io
+
+    with tempfile.TemporaryDirectory() as tmp:
+        old = {
+            "captured_at": "2026-10-08T10:00:00+00:00",
+            "windows": [
+                {
+                    "window_index": 1,
+                    "tabs": [
+                        {
+                            "tab_index": 1,
+                            "pane_index": 1,
+                            "title": "web",
+                            "kind": "command",
+                            "cwd": "/srv",
+                            "session_id": None,
+                            "restore": "cd /srv && tail -f notes~",
+                        }
+                    ],
+                }
+            ],
+        }
+        setup(Path(tmp), old, live(["web"]))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            assert cli.cmd_restore(args(go=False)) == 0
+        printed = out.getvalue()
+        assert "tab  1  cd /srv\n" in printed, printed
+        assert "not replayed" in printed and "tail -f notes~" in printed, printed
+
+
 def test_force_is_passed_through_as_given():
     for force in (False, True):
         with tempfile.TemporaryDirectory() as tmp:
