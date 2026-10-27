@@ -25,20 +25,24 @@ Any local process controls its own argv and working directory, so:
   recorded command line, replayed as it was**, unless it contains shell syntax, in which case it
   is reported and downgraded to the bare `cd`.
 
-The shell-syntax filter rejects shell metacharacters, zsh's included (`~`, `^`, `#`, and `=` at
-the start of a word), so a recorded line can neither chain or substitute commands nor expand into
-different arguments. It does not check what the program is: treat every listed command as one the
+The shell-syntax filter rejects shell metacharacters, zsh's included (`~`, `^`, `#`, `=` at the
+start of a word and `==` inside one), so a recorded line can neither chain or substitute commands
+nor expand into different arguments. It runs at capture and again when the plan is built, so a
+snapshot taken by an older version is held to the current rules. Aliases you define still apply
+to the first word, as they would if you typed the line yourself. It does not check what the program is: treat every listed command as one the
 recording process chose. That is why restore is a dry run by default. **Read the plan before
 `--go`**; it shows exactly what will be typed.
 
 Where it types:
 
 - never into a tab running something, unless you pass `--force`;
-- never into the tab it runs from. It finds that tab from its own terminal; run without one (from
-  a script, say), it cannot, so `--go --force` is refused there;
+- never into the tab it runs from. It finds that tab from its own terminal. Run without one (from
+  a script, say) or from one iTerm does not own (tmux, ssh), it cannot, so `--go --force` is
+  refused there;
 - never a session already running in any iTerm pane, `--force` or not.
 
-Busy tabs and running sessions are read again just before typing starts, so the plan is not
+Process listings are parsed so that one process's command line cannot pose as another process
+on another tab. Busy tabs and running sessions are read again just before typing starts, so the plan is not
 trusted blindly.
 
 Out of scope: anyone who can already write to `~/.agent-tabs/` as you, or type into your
