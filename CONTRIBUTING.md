@@ -59,6 +59,10 @@ scan over the whole history on every pull request, so the hook only saves you a 
   wrong.
 - **Mutation-check every new test.** Break the code it covers, confirm the test fails, then
   restore it from a copy (`cp`). A test that passes against broken code is worse than none.
+  Run a mutated module with a fresh bytecode cache, as `tests/run_all.py` does: an edit of the
+  same byte length, restored with a matching mtime, passes Python's mtime+size check and the
+  stale mutant keeps running. `-B` does not prevent this; it only stops writing `.pyc` files.
+  Use `PYTHONPYCACHEPREFIX=$(mktemp -d) python3 tests/test_x.py`.
 - **Drive the real call site.** A test that asserts on a mocked-out version of the mechanism it
   is meant to check proves nothing.
 - **Standard library only**, and no packaging: agent-tabs runs from a clone.
