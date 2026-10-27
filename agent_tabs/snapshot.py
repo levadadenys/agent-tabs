@@ -7,7 +7,7 @@ import os
 import re
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import adapters, iterm, procs
@@ -16,11 +16,22 @@ STATE_DIR = Path(os.environ.get("AGENT_TABS_HOME", Path.home() / ".agent-tabs"))
 LATEST = STATE_DIR / "snapshot.json"
 # The last snapshot captured before the most recent boot, pinned on the first
 # promotion after that boot. History alone cannot protect it: it keeps only the
-# last HISTORY_KEEP captures, and an idle iTerm after a reboot fills history
-# with empty captures within about half an hour.
+# last HISTORY_WINDOW_SECONDS of captures (with a floor), and an idle iTerm
+# after a reboot fills that with empty captures.
 PRE_BOOT = STATE_DIR / "pre-boot.json"
 HISTORY_DIR = STATE_DIR / "history"
-HISTORY_KEEP = 60
+# History is kept by age, not by count, so it means the same at any recorder
+# interval: every capture younger than HISTORY_WINDOW_SECONDS, and never fewer
+# than the newest HISTORY_MIN. The floor is what survives a long sleep, when
+# age alone would delete the whole pre-sleep history on the first capture
+# after waking -- exactly what the pre-boot pin's fallback reads. HISTORY_CAP
+# bounds the total at the fastest interval (10 s).
+#
+# Pruning deliberately does not read the configured interval: the recorder may
+# be running an older plist than config.json says, and by age that is harmless.
+HISTORY_MIN = 60
+HISTORY_WINDOW_SECONDS = 1800
+HISTORY_CAP = HISTORY_WINDOW_SECONDS // 10
 
 # A capture keeping at least this share of the last good count is an ordinary
 # change (you closed a tab); below it looks like a collapse.
@@ -167,7 +178,7 @@ def _pin_pre_boot(incoming: dict) -> None:
     Either alone can miss the fleet. snapshot.json may be unreadable, already
     replaced because an earlier pin failed, or a half-dead shutdown capture
     the collapse guard accepted because the shutdown dragged on; history keeps
-    only about half an hour, so after a long idle spell before the reboot the
+    about half an hour (HISTORY_WINDOW_SECONDS), so after a long idle spell before the reboot the
     fleet survives only in snapshot.json. On a tie snapshot.json wins: it is
     the capture the guard vetted. A failure here must never block a capture.
     """
@@ -323,9 +334,28 @@ def _write_atomic(path: Path, snap: dict) -> None:
         raise
 
 
+def _history_by_time() -> list[Path]:
+    """History archives, oldest first, by the time in their names.
+
+    Not by filename sort: the two agree only while every name parses. A name
+    _archive_time cannot read sorts oldest, so only the floor keeps it.
+    """
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    return sorted(HISTORY_DIR.glob("*.json"), key=lambda p: (_archive_time(p) or oldest, p.name))
+
+
 def _prune_history() -> None:
-    files = sorted(HISTORY_DIR.glob("*.json"))
-    for stale in files[:-HISTORY_KEEP]:
+    files = _history_by_time()
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=HISTORY_WINDOW_SECONDS)
+    keep = set(files[-HISTORY_MIN:])
+    for path in files:
+        when = _archive_time(path)
+        # A future-dated archive (the clock went back) counts as young; the cap
+        # bounds it, and drops the oldest first, so never the real new captures.
+        if when is not None and when >= cutoff:
+            keep.add(path)
+    kept = [p for p in files if p in keep][-HISTORY_CAP:]
+    for stale in set(files) - set(kept):
         stale.unlink(missing_ok=True)
 
 
@@ -384,7 +414,8 @@ def load(path: Path | None = None) -> dict:
         if path is not None:
             raise FileNotFoundError(
                 f"No snapshot at {target}. Check the path; history files rotate "
-                f"out after {HISTORY_KEEP} captures (ls {HISTORY_DIR})."
+                f"out after about {HISTORY_WINDOW_SECONDS // 60} minutes, the newest "
+                f"{HISTORY_MIN} always kept (ls {HISTORY_DIR})."
             )
         raise FileNotFoundError(
             f"No snapshot at {target}. Is the recorder installed? Run: agent-tabs install"
