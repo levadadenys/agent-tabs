@@ -65,7 +65,7 @@ scan over the whole history on every pull request, so the hook only saves you a 
 - **Nothing machine-specific in the repo.** Examples use `/Users/you`.
 - One topic per pull request. Commit subjects follow
   [Conventional Commits](https://www.conventionalcommits.org/); the body says why the old
-  behaviour was wrong, not what the diff shows. CI (tests on Python 3.9–3.14, ruff, mypy,
+  behaviour was wrong, not what the diff shows. CI (tests on Python 3.9 and 3.14, ruff, mypy,
   shellcheck, gitleaks) must pass.
 - Update `README.md` and `CHANGELOG.md` when behaviour or commands change.
 
