@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent_tabs import adapters, config, procs  # noqa: E402
 
-UUID = "01a08085-3793-7381-aee8-61af378efc44"
+UUID = "00000000-0000-7000-8000-000000000001"
 
 
 def _rollout(home: Path) -> Path:
