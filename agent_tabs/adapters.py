@@ -26,11 +26,33 @@ SHELL_METACHARACTERS = set(";&|<>`$()\n\r\\!*?{}[]\"'~^#")
 
 
 def _has_shell_syntax(command: str) -> bool:
-    # A word starting with `=` is zsh's path expansion (`=ls` is /bin/ls). Only
-    # at the start of a word: `--port=3000` must still replay.
+    # A word starting with `=` is zsh's path expansion (`=ls` is /bin/ls), and
+    # with MAGIC_EQUAL_SUBST so is `==` inside one (`x==ls` is x=/bin/ls). A
+    # single `=` mid-word is left alone: `--port=3000` must still replay.
     return bool(set(command) & SHELL_METACHARACTERS) or any(
-        word.startswith("=") for word in command.split()
+        word.startswith("=") or "==" in word for word in command.split()
     )
+
+
+def checked_restore(tab: dict) -> str:
+    """A tab's restore command, re-checked against the current filter.
+
+    The filter runs at capture, so a snapshot taken by an older version, or the
+    pinned pre-boot copy, can hold a line it would now reject; that line is
+    downgraded to the bare cd here, as it would be at capture. Only command and
+    ssh tabs replay recorded text: agent and shell restores are built from
+    validated parts.
+    """
+    restore = tab.get("restore") or ""
+    if tab.get("kind") not in ("command", "ssh"):
+        return restore
+    prefix = _cd(tab.get("cwd"))
+    if restore == prefix:
+        return restore  # already the bare cd
+    replayed = (
+        restore[len(prefix) + 4 :] if prefix and restore.startswith(prefix + " && ") else restore
+    )
+    return prefix if _has_shell_syntax(replayed) else restore
 
 
 HOME = Path.home()
