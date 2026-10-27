@@ -33,6 +33,11 @@ into live shells, so a wrong result is not a cosmetic bug.
 
 `python3 tests/run_all.py` must pass. No test framework, no dependencies.
 
+CI (`.github/workflows/ci.yml`) runs the suite on macOS for Python 3.9–3.14,
+plus `ruff check .`, `mypy` and `shellcheck .githooks/pre-push`. The lint
+tools are pinned in `requirements-dev.txt`; they are development tools, not
+dependencies of agent-tabs.
+
 Two rules, both learned the hard way in this repo:
 
 - **Mutation-check every new test.** Break the code it covers, confirm the test
@@ -75,6 +80,11 @@ The pre-push hook runs it automatically over **the commits being pushed**, not
 the working tree, so pushing another branch's ref from this checkout is still
 scanned. If gitleaks is missing the hook refuses the push rather than passing
 it unscanned.
+
+CI runs the same scan over the whole history on every PR and on `main`, so a
+clone that never enabled the hook is still caught before merge. Like the hook,
+it refuses a scan that covered no commits: gitleaks exits 0 when its own `git`
+call fails.
 
 A hand-rolled `grep` scanner lived here first and was replaced after five
 rounds of review found five ways it could report clean while a leak existed
