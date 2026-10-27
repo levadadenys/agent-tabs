@@ -85,38 +85,58 @@ History length also bounds the pre-reboot pin's fallback
    - `HISTORY_KEEP` is renamed `HISTORY_MIN`. Update its users:
      `tests/test_snapshot_store.py` and the "history files rotate out after N
      captures" message in `snapshot.load()`.
-4. **Collapse guard by time.** Walk back from the newest archive through the
-   consecutive run of collapsed captures (`0 < count < floor`), stopping at
-   the first one that is not collapsed or cannot be read. Promote once that
-   run spans at least `COLLAPSE_SETTLE_SECONDS`. A span needs two captures,
-   so "at least two" follows from the rule rather than being a second one.
-   The walk is bounded by history.
-   - Why the count can go: what rules out a burst of captures landing at
-     once is the settle time, not the count (see the comment above
-     `COLLAPSE_SETTLE_SECONDS`). At 10 s and 30 s, the settle time already
-     forces three or more captures, so nothing changes there except fixing
-     the 10 s bug. Only long intervals change: at 300 s a genuine drop is
-     accepted on the second collapsed capture, ~5 min, instead of ~10.
-   - A run may span a reboot: a half-dead capture from the shutdown, then the
-     first small one after boot. That promotes on the first post-boot capture
-     at a long interval. It is safe because promotion runs `_pin_pre_boot`
-     before writing `snapshot.json`, which keeps the pre-reboot fleet. Test
-     it rather than assume it.
+   - **Order archives by parsed time**, here and in the collapse guard, not by
+     filename sort. Today the two agree, because `save()` names archives by
+     UTC time. A name `_archive_time` cannot parse sorts oldest: only the
+     floor keeps it, and the collapse guard skips it. An archive dated in the
+     future (the clock went back) sorts newest and counts as young. The cap
+     drops the oldest by parsed time, so it never deletes the real new
+     captures in favour of the future-dated ones. The collapse guard reads
+     the future-dated archive as the newest. While it is not collapsed, a
+     collapse cannot promote, which holds a good snapshot rather than
+     overwriting it. That lasts until the clock passes it.
+4. **Collapse guard: a minimum count, and time over the whole run.** Walk back
+   from the newest archive through the consecutive run of collapsed captures
+   (`0 < count < floor`), stopping at the first that is not collapsed or
+   cannot be read. Promote once that run holds at least `COLLAPSE_STREAK`
+   (3) captures **and** spans at least `COLLAPSE_SETTLE_SECONDS`.
+   - What changes: today's guard reads exactly the newest three archives
+     (`_recent_entries(COLLAPSE_STREAK)`), which at 10 s span 20 s and never
+     reach the settle. Walking the whole run fixes that: at 10 s a drop is
+     accepted at ~50 s. At 30 s nothing changes. At 300 s it stays ~10 min,
+     as today.
+   - Why the count stays: dropping to "span only" was considered and
+     rejected. A gap supplies span for free: a half-dead capture from a
+     shutdown and the first small capture after boot are two collapsed
+     captures more than 45 s apart, and would promote at once, at any
+     interval. The pre-reboot pin does not make that safe: `_pin_pre_boot`
+     skips pinning when the boot time cannot be read, and swallows a failed
+     write, and promotion goes ahead in both cases. The count is what still
+     protects the fleet then. The settle time rules out a burst of captures
+     landing at once; the count rules out a gap. Each covers what the other
+     cannot.
+   - The walk is bounded by history.
    - This is the most safety-relevant part of the spec. Ship it as its own
      PR, separate from items 1–3 and 5, and re-read the existing
      shutdown-guard tests before changing the code.
 5. **Config reading must be as robust as the snapshot readers.** Today
    `config.load()` catches `JSONDecodeError` and `OSError` only, so bad UTF-8
-   raises `UnicodeDecodeError`. It also accepts non-object JSON, which
-   `config.update` then merges with `dict.update`: some lists raise
-   (`[1, 2]`), others are silently accepted (`[]`, `[["a", 1]]`). Install
-   would now read the config too. Catch `ValueError` and require a dict, as
-   `snapshot._read` does.
+   raises `UnicodeDecodeError`. It also accepts non-object JSON and merges it
+   with `dict.update` inside `load()`. Most non-objects then raise uncaught
+   (`5`, `null`, `"ab"`, `[1, 2]`). Some lists are silently accepted (`[]`,
+   `[["a", 1]]`). Install would now read the config too. Catch `ValueError`
+   and require a dict, as `snapshot._read` does.
+   - `config.codex_command` has the same flaw one level down. It calls
+     `.get` on `codex_profiles`, so a non-object value there crashes a
+     capture: `adapters` calls it for every Codex tab. Require a dict there
+     too, and treat a non-string value as no entry.
 
 ### Tests
 
 Drive the real call sites (`install`'s plist builder, `snapshot.save()`), not
-helpers.
+helpers. Install tests must point `AGENT_TABS_HOME` at a temporary directory.
+The current sandbox in `test_install_exit.py` does not redirect the config
+path, so a new test would read the real `~/.agent-tabs/config.json`.
 
 - Clamping, read back from the written plist: `5` → 10, `9999` → 300, `0`
   and `-5` → 10, `60` → 60; `true`, `60.0`, `NaN`, `"60"`, `"abc"`, `null`,
@@ -129,13 +149,25 @@ helpers.
   - A 3-hour gap followed by one new capture keeps the new capture plus the
     newest 59 pre-gap archives (`save()` archives before it prunes).
   - An unparseable filename is kept only within the floor.
-- The collapse guard at 10 s, 30 s and 300 s: a burst of captures within
-  seconds is never accepted; a genuine drop is accepted once the collapsed
-  run spans the settle time. The 10 s case must fail against today's
-  fixed-window code. A run spanning a reboot pins `pre-boot.json` with the
-  pre-reboot fleet before promoting.
-- Damaged `config.json` (bad UTF-8, a list, `{"interval_seconds": []}`,
-  `{"interval_seconds": NaN}`) never breaks install or a capture.
+  - A future-dated archive does not cause the cap to delete newer real
+    captures.
+- The collapse guard at 10 s, 30 s and 300 s:
+  - A burst of captures within seconds is never accepted.
+  - A genuine drop is accepted once the run holds three captures and spans
+    the settle time.
+  - The 10 s case must fail against today's fixed-window code.
+  - Two collapsed captures either side of a long gap do not promote. This
+    is the regression that dropping the count would cause.
+
+  Archive times come from filenames, so backdate the filenames, as
+  `test_a_burst_of_captures_is_not_time_enough` does. Real-clock names give a
+  span of about 0 s, and a test asserting "not promoted" passes against
+  anything. Where a test expects no promotion, show that the same setup with
+  one more capture does promote.
+- Damaged `config.json` never breaks install or a capture: bad UTF-8, `5`,
+  `null`, a list, `{"interval_seconds": []}`, `{"interval_seconds": NaN}`,
+  `{"codex_profiles": []}`. For a capture, drive it through a Codex tab's
+  resume command, the path that calls `codex_command`.
 - Mutation-check each test, restoring with `cp`, as for every test in this
   repo.
 
@@ -143,13 +175,22 @@ helpers.
 
 Prose that states 30 s, 60 captures or three captures, and goes stale:
 
-- README: the intro ("every 30 seconds"), Install (the setting, re-running
-  `install`), Commands (`snapshot` comment), Snapshots and reboots ("the last
-  60 captures, about half an hour", "three captures and at least 45 seconds"),
-  Config.
-- `snapshot.py`: the comments above `PRE_BOOT` and `COLLAPSE_STREAK`, and the
-  `save()` docstring ("a shutdown never lasts that long").
+- README:
+  - the intro ("every 30 seconds");
+  - Install (the setting, and re-running `install`);
+  - Commands (the `snapshot` comment);
+  - Snapshots and reboots ("the last 60 captures, about half an hour", "three
+    captures and at least 45 seconds", and history rotating the full
+    snapshot out "within half an hour");
+  - Config.
+- `snapshot.py`:
+  - the comments above `PRE_BOOT` and `COLLAPSE_STREAK`;
+  - the `_pin_pre_boot` docstring ("about half an hour");
+  - the `save()` docstring ("a shutdown never lasts that long").
 - `install.py`: the `_stop_legacy_processes` docstring ("every 30s").
+- Test docstrings that state the same numbers: `test_pre_boot.py`,
+  `test_shutdown_guard.py`, `test_install_exit.py`. Grep for `30`, `60` and
+  `half an hour`.
 - `config.example.json`: add `"interval_seconds": 30`.
 - AGENTS.md, under the safety rules: history is pruned by time with a floor
   of the newest 60, and pruning never reads the configured interval.
@@ -162,27 +203,50 @@ Prose that states 30 s, 60 captures or three captures, and goes stale:
   with it:
 
   ```bash
+  git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*'  # PR heads go public too
   gitleaks git --no-banner --log-opts="--all -m"
   ```
 
   `-m` matters: without it gitleaks skips a merge's own conflict resolution,
   the same reason the pre-push hook passes it.
 
-  gitleaks reads diffs only. Read these by hand. They are listings that print
-  everything, not a scanner that can pass, so AGENTS.md's rule against
-  hand-rolled scanners does not apply:
+  gitleaks reads diffs only. Read the following by hand. They are listings
+  that print everything for a person to read, not a scanner that can report
+  clean, so AGENTS.md's rule against hand-rolled scanners does not apply. Run
+  each one so that a failing `git` is visible: `set -o pipefail`, or write to
+  a file and check the exit status. An empty listing is the expected result
+  for the binary check, so an empty listing from a failed command must not
+  pass for clean.
 
-  - author and committer metadata:
-    `git log --all --format='%an <%ae> | %cn <%ce>' | sort | uniq -c`;
-  - commit messages: `git log --all --format=%B`;
-  - annotated tags: `git tag -n99`;
-  - files git treats as binary, whose content gitleaks never sees:
-    `git log --all --numstat --format= | awk '$1 == "-"'`;
-  - real session ids in fixtures, since a test may have been written against
-    a live session;
-  - everything on GitHub that goes public with the code: PR and issue
+  - Author and committer metadata:
+    `git log --all --format='%an <%ae> | %cn <%ce>' | sort | uniq -c`.
+  - Commit messages: `git log --all --format=%B`.
+  - Annotated tags: the tagger and the full annotation, since `git tag -n99`
+    shows neither the tagger nor more than 99 lines:
+    `git for-each-ref refs/tags --format='%(refname:short) %(taggername) %(taggeremail)%0a%(contents)'`.
+  - Files git treats as binary, whose content gitleaks never sees:
+    `git log --all -m --numstat --format= | awk '$1 == "-"'`.
+  - Session ids in fixtures, since a test may have been written against a
+    live session. List the UUIDs, then check each against
+    `~/.claude/projects` and `~/.codex*/sessions`:
+    `git log --all -m -p | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | sort -u`.
+  - Everything on GitHub that goes public with the code: PR and issue
     bodies, review comments, and stale remote branches. Comment edit history
-    is public too: delete old revisions in the comment's "edited" menu.
+    is public too: delete old revisions from the comment's "edited" menu.
+
+  **Run 2026-10-27:**
+  - gitleaks was clean with `-m` across all refs.
+  - No tags and no binary files.
+  - Every commit is authored with a personal gmail address. This was accepted
+    as is: the address is already public through another public repo, and a
+    rewrite would change every SHA and break the merged PRs' commit links.
+  - One real Codex session id was found, in `tests/test_codex_profile.py`. It
+    is to be replaced in a normal commit. History keeps it, but it identifies
+    a file on one machine and grants nothing.
+  - One PR review comment named a private sibling repo. It was edited, and
+    its old revision is to be deleted by hand.
+  - A real Claude session id sits in a PR #6 comment. That is pending a
+    decision.
 - **README for strangers.**
   - Requirements: macOS, iTerm2, and Python 3.9 or later. The macOS system
     `python3` is 3.9; the suite passes on 3.9–3.14 (checked 2026-10-27).
