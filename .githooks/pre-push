@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Guard the default branch, and keep secrets and personal paths out of a repo
 # that is intended to become public.
 #
@@ -49,6 +49,8 @@ scan_tree() {
         fail "could not list the tree for $1." "Refusing rather than skipping the scan."
     fi
 
+    # The rm calls inside the loop only run on the way to fail(), which exits.
+    # shellcheck disable=SC2094
     while IFS= read -r -d '' path; do
         [ -z "$path" ] && continue
         if ! mkdir -p "$tmp/$(dirname "$path")" 2>/dev/null; then
@@ -91,6 +93,8 @@ scan_range() {
     # Collapse whitespace: gitleaks splits --log-opts on spaces, so a doubled
     # one becomes an empty revision and git aborts with "ambiguous argument".
     set -- "$(printf '%s' "$1" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
+    # $1 is a revision list ("sha ^excluded..."): it must word-split.
+    # shellcheck disable=SC2086
     count=$(git rev-list --count $1 2>/dev/null) || \
         fail "could not resolve the commit range '$1'." \
              "Refusing rather than pushing unscanned. Override with --no-verify."
@@ -129,6 +133,7 @@ scan_range() {
     # genuinely broken "0 commits scanned" through.
     # `|| true` would mask a git log failure as well as grep's no-match status,
     # leaving touched=0 and skipping the guard entirely. Check git separately.
+    # shellcheck disable=SC2086  # a revision list, as in scan_range
     if ! git log --format= --name-only -m $1 > "$tmp_names" 2>/dev/null; then
         rm -f "$tmp_names"
         fail "could not inspect the commit range '$1'." \
@@ -176,6 +181,7 @@ remote_exclusions() {
       kill "$watcher" 2>/dev/null
       exit "$status"
     )
+    # shellcheck disable=SC2181  # the status of the timed subshell above
     if [ $? -ne 0 ]; then
         rm -f "$refs_file"
         return 0

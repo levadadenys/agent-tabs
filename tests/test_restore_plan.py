@@ -5,8 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import restore  # noqa: E402
-
+from agent_tabs import restore
 
 SNAP_WINDOW = {
     "window_index": 1,

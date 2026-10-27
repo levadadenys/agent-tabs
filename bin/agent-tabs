@@ -10,7 +10,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import adapters, iterm, restore as restore_mod, snapshot as snap_mod  # noqa: E402
+from agent_tabs import adapters, iterm
+from agent_tabs import restore as restore_mod
+from agent_tabs import snapshot as snap_mod
+
 
 def age_of(captured_at: str) -> str:
     """How long ago a snapshot was taken, in words.
@@ -63,7 +66,7 @@ def cmd_snapshot(args) -> int:
 def _print_window(window: dict, tabs: list[dict]) -> None:
     print(f"\nWindow {window['window_index']}  ({len({t['tab_index'] for t in tabs})} tabs)")
     for tab in tabs:
-        mark = KIND_MARK.get(tab.get("kind"), "?")
+        mark = KIND_MARK.get(tab.get("kind") or "", "?")
         title = (tab.get("title") or "").strip() or "(untitled)"
         # Only the first pane of a tab is ever recreated; label the rest so the
         # listing cannot be mistaken for a set of separately restorable tabs.

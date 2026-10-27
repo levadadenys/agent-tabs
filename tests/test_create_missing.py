@@ -11,8 +11,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import iterm, restore, snapshot as snap_mod  # noqa: E402
-from runner import run  # noqa: E402
+from runner import run
+
+from agent_tabs import iterm, restore
+from agent_tabs import snapshot as snap_mod
 
 # Captured before any test stubs it: install() replaces restore.running_sessions
 # for the tests that drive execute(), and a later test of the real function must

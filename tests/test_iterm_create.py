@@ -10,8 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import iterm  # noqa: E402
-from runner import run  # noqa: E402
+from runner import run
+
+from agent_tabs import iterm
 
 
 def with_osascript(reply):
@@ -48,7 +49,7 @@ def test_create_window_does_not_walk_window_order():
 
 
 def test_create_window_refuses_an_empty_id():
-    calls, original = with_osascript("\n")
+    _calls, original = with_osascript("\n")
     try:
         try:
             iterm.create_window(1)

@@ -34,7 +34,7 @@ COLLAPSE_STREAK = 3
 # ...and spanning at least this long. Counting captures is not the same as the
 # collapse persisting: several captures can land at once (a manual snapshot
 # racing the launchd tick), which would satisfy a pure count instantly.
-COLLAPSE_SETTLE_SECONDS = 45
+COLLAPSE_SETTLE_SECONDS: float = 45
 
 # Both derive from adapters, which owns the definition of "is an agent".
 AGENT_KINDS = adapters.AGENT_KINDS
@@ -180,10 +180,10 @@ def _pin_pre_boot(incoming: dict) -> None:
     if _pinned_for(booted):
         return  # already pinned for this boot
 
-    candidates = []
+    candidates: list[dict] = []
     current = _read(LATEST)
     taken = captured_at(current) if current is not None else None
-    if taken is not None and taken < booted:
+    if current is not None and taken is not None and taken < booted:
         candidates.append(current)
     archived = _fullest_pre_boot_archive(booted)
     if archived is not None:

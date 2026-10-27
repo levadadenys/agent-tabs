@@ -1,0 +1,22 @@
+# Tool configuration only. agent-tabs is not a package: it runs from a clone
+# (see AGENTS.md, Constraints), so there is no [project] table to build.
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+extend-include = ["bin/agent-tabs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "BLE", "RUF"]
+# The formatter owns line length; what it leaves long is strings and comments.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# `s` and `l` are the convention for a snapshot and a live window side by side,
+# and the runners catch every exception on purpose: a failing test is data.
+"tests/*" = ["E741", "BLE001"]
+
+[tool.mypy]
+# mypy 2.x cannot target 3.9; the 3.9 test job and ruff's py39 target cover it.
+python_version = "3.10"
+files = ["agent_tabs", "tests", "bin/agent-tabs"]

@@ -10,8 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import restore  # noqa: E402
-from runner import run  # noqa: E402
+from runner import run
+
+from agent_tabs import restore
 
 
 def snap(*windows):
@@ -95,7 +96,7 @@ def test_the_stronger_match_claims_the_window():
     further back -- and the weak window then had the wrong sessions typed in.
     """
     s = snap(["p", "q", "r"])
-    pairs, unmatched, notes = restore.match_all(
+    pairs, _unmatched, notes = restore.match_all(
         s, live(["p", "unrelated"], ["p", "q", "r"])
     )
     assert [(w, m["window_index"]) for w, m in pairs] == [(2, 1)], pairs
@@ -281,7 +282,7 @@ def test_a_shell_name_alone_is_not_evidence():
     the wrong place.
     """
     s = snap(["web", "-zsh"], ["api"])
-    pairs, unmatched, notes = restore.match_all(s, live(["-zsh"]))
+    pairs, _unmatched, notes = restore.match_all(s, live(["-zsh"]))
     assert pairs == [], f"paired on a shell name: {pairs}"
     assert any("no snapshot window matches" in n for n in notes), notes
 

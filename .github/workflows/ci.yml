@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (Python ${{ matrix.python }})
+    # macOS, not Linux: the tool is macOS-only and the suite drives the real
+    # lsof, ps and sysctl it depends on. Free for public repositories.
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is what macOS ships as /usr/bin/python3.
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python tests/run_all.py
+
+  lint:
+    name: ruff + mypy + shellcheck
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: mypy
+      - run: shellcheck .githooks/pre-push
+
+  gitleaks:
+    name: gitleaks (full history)
+    runs-on: ubuntu-24.04
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: install gitleaks (pinned, checksum-verified)
+        run: |
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "${tarball}" gitleaks
+      # Every commit on every fetched ref, not just the PR's: a scan is
+      # cheap, and the history goes public as a whole. -m includes merge
+      # resolutions, as the pre-push hook does.
+      - name: scan
+        run: |
+          set +e
+          output=$(./gitleaks git --no-banner --redact --config .gitleaks.toml \
+                     --log-opts="--all -m" 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          # gitleaks exits 0 when its own git call fails, so an empty scan
+          # would read as clean. This history always has commits to scan.
+          if ! echo "$output" | grep -qE '(^|[^0-9])[1-9][0-9]* commits scanned'; then
+            echo "::error::gitleaks scanned no commits; refusing to report clean"
+            exit 1
+          fi
+          exit "$status"

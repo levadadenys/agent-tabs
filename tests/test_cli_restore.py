@@ -16,11 +16,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from agent_tabs import iterm, restore, snapshot as snap_mod  # noqa: E402
 from runner import run  # noqa: E402
+
+from agent_tabs import iterm, restore  # noqa: E402
+from agent_tabs import snapshot as snap_mod  # noqa: E402
 
 _loader = SourceFileLoader("agent_tabs_cli", str(ROOT / "bin" / "agent-tabs"))
 _spec = importlib.util.spec_from_loader("agent_tabs_cli", _loader)
+assert _spec is not None
 cli = importlib.util.module_from_spec(_spec)
 _loader.exec_module(cli)
 
@@ -129,10 +132,11 @@ def test_force_is_passed_through_as_given():
 
 
 def test_window_counts_name_only_windows_that_start_something():
-    import contextlib, io
+    import contextlib
+    import io
     with tempfile.TemporaryDirectory() as tmp:
         the_snap = snap([("web", "s1")], [("api", "s2")])
-        rec = setup(Path(tmp), the_snap, live(["web"], ["api"]))
+        setup(Path(tmp), the_snap, live(["web"], ["api"]))
         restore.running_sessions = lambda: {"s2": "live window 9 tab 1"}  # type: ignore[assignment]
         for go in (False, True):
             out = io.StringIO()

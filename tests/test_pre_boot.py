@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from runner import run  # noqa: E402
+from runner import run
 
 BOOT = datetime(2026, 9, 26, 13, 33, tzinfo=timezone.utc)
 

@@ -177,7 +177,7 @@ AGENT_RESOLVERS = {
 # from this: undercounting here would let an empty capture overwrite a good
 # snapshot, and a missing entry would let restore clobber a live session.
 AGENT_KINDS = frozenset(AGENT_RESOLVERS)
-ALL_KINDS = tuple(AGENT_RESOLVERS) + ("ssh", "command", "shell", "empty")
+ALL_KINDS = (*tuple(AGENT_RESOLVERS), "ssh", "command", "shell", "empty")
 
 
 def resolve(proc: procs.Proc | None, cwd: str | None) -> dict:

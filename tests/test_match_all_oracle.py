@@ -22,8 +22,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import restore  # noqa: E402
-from runner import run  # noqa: E402
+from runner import run
+
+from agent_tabs import restore
 
 SEED = 20260930
 INSTANCES = 600
