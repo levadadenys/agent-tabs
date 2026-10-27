@@ -579,7 +579,7 @@ def plan(
             index,
             tab.get("title") or "",
             tab.get("kind") or "",
-            adapters.checked_restore(tab),
+            adapters.checked_restore(tab)[0],
             session_id=session,
         )
         existing = busy.get(index)
