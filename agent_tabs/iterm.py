@@ -12,20 +12,28 @@ import time
 
 # ASCII unit separator between fields, linefeed between rows. A tab title is
 # the one field a program controls (any process can set its tab's title), so
-# CLEAN_HANDLER replaces every row and field separator in it with a space
-# before it is emitted: a title can never carry a forged row.
+# CLEAN_HANDLER replaces every control character and line separator in it with
+# a space before it is emitted: a title can never carry a forged row. By code
+# point (`id of t`), not with text item delimiters: those match whole grapheme
+# clusters, so a linefeed followed by a combining mark was never matched.
 FIELD = "\x1f"
 FIELD_AS = "(character id 31)"
 
 CLEAN_HANDLER = """
 on clean(t)
-    set saved to AppleScript's text item delimiters
-    set AppleScript's text item delimiters to {linefeed, return, character id 8232, character id 8233, character id 133, character id 11, character id 12, character id 28, character id 29, character id 30, character id 31}
-    set parts to text items of t
-    set AppleScript's text item delimiters to " "
-    set t to parts as text
-    set AppleScript's text item delimiters to saved
-    return t
+    if t is "" then return ""
+    set ids to id of t
+    if class of ids is integer then set ids to {ids}
+    set out to {}
+    repeat with c in ids
+        set c to contents of c
+        if c < 32 or (c > 126 and c < 160) or c = 8232 or c = 8233 then
+            set end of out to 32
+        else
+            set end of out to c
+        end if
+    end repeat
+    return character id out
 end clean
 """
 
@@ -121,7 +129,10 @@ def _enumerate_once() -> list[dict]:
     rows = []
     seen: set[tuple[str, int, int]] = set()
     for line in _osascript(ENUMERATE).split("\n"):
-        if not line.strip():
+        # Only a truly empty line (the end of the output) is skipped: str.strip()
+        # counts the field separator as whitespace, so a row of nothing but
+        # separators would vanish instead of failing the listing.
+        if line == "":
             continue
         parts = line.split(FIELD)
         if len(parts) != 6:
