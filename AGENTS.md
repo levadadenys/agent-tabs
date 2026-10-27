@@ -143,6 +143,12 @@ an issue.
 - A title that is only a shell name is not evidence of which window it was.
 - Never let a capture with no agent sessions overwrite a good snapshot, nor a
   collapsed one until the drop has persisted.
+- Keep history by age with a floor: every capture younger than
+  `HISTORY_WINDOW_SECONDS`, never fewer than the newest `HISTORY_MIN`. Age
+  alone would empty history on the first capture after a long sleep, which is
+  what the pre-boot pin's fallback reads. Pruning must never read the
+  configured interval: the recorder may run an older plist than `config.json`
+  says.
 - Keep the pre-reboot snapshot recoverable: `pre-boot.json` is pinned on the
   first promotion after each boot, tagged with that boot: the fuller of
   `snapshot.json` (if it predates the boot) and the fullest pre-boot capture
