@@ -2,8 +2,8 @@
 
 With no windows restored, starting even one session before running restore
 lets that small capture replace snapshot.json about a minute later (the
-collapse guard accepts a persistent drop). History keeps only the last 60
-captures, and an idle iTerm fills it with empty ones within about half an hour,
+collapse guard accepts a persistent drop). History keeps about the last half
+hour of captures, and an idle iTerm fills it with empty ones,
 so the full fleet would be gone. It is pinned in pre-boot.json on the first
 promotion after a boot, and restore/list warn when the snapshot in use is the
 smaller post-reboot one.
