@@ -34,15 +34,15 @@ into live shells, so a wrong result is not a cosmetic bug.
 `python3 tests/run_all.py` must pass. No test framework, no dependencies.
 
 CI runs the suite on macOS (`.github/workflows/tests.yml`, only when code or
-tests change) for Python 3.9–3.14, or just 3.9 and 3.14 while the repository
-is private, where macOS minutes bill at ten times the Linux rate. Every change
-also gets (`ci.yml`) `ruff check .`, `ruff format --check .`, `mypy` and
+tests change) for the bounds of the supported range, Python 3.9 and 3.14. Every
+change also gets (`ci.yml`) `ruff check .`, `ruff format --check .`, `mypy` and
 `shellcheck .githooks/pre-push`. Run `ruff format .` before committing. The lint
 tools are pinned in `requirements-dev.txt`; they are development tools, not
 dependencies of agent-tabs.
 
-While CI tests only the bounds, run the suite locally on the versions in
-between before merging (`uv python find 3.11` gives an interpreter).
+CI tests only the bounds, so for a change that could depend on the Python
+version, run the suite locally on the versions in between too
+(`uv python find 3.11` gives an interpreter).
 
 Two rules, both learned the hard way in this repo:
 
