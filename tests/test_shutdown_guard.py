@@ -316,6 +316,21 @@ def test_an_unreadable_capture_inside_the_run_stops_it():
     assert settles([90, 60, 30]), "setup: the same run, readable, promotes"
 
 
+def test_an_empty_capture_never_counts_as_the_last_good_one():
+    # With snapshot.json unreadable the guard falls back to history. If the
+    # newest archive is an empty capture (iTerm closed, say), taking its 0 as
+    # the last good count switched the guard off: the next small capture
+    # replaced the whole fleet.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp), settle=45)
+        history(m, 3600, [])
+        m.save(snap(0, "empty"))
+        m.LATEST.write_text("garbage")
+        latest, _ = m.save(snap(3, "small"))
+        assert latest is None, "an empty archive switched the collapse guard off"
+    assert settles([90, 60, 30]), "setup: a persisted drop still promotes"
+
+
 def test_concurrent_saves_do_not_corrupt_the_decision():
     # Two captures can overlap (a manual snapshot racing the 30s tick). With no
     # read-modify-write state there is nothing to lose an update on.
