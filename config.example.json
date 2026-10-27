@@ -1,4 +1,5 @@
 {
+  "interval_seconds": 30,
   "codex_profiles": {
     "/Users/you/.codex-work": "codex work"
   }
