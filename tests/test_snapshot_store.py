@@ -22,19 +22,39 @@ def fresh_module(state_dir: Path):
     """Re-import snapshot with AGENT_TABS_HOME pointed at a temp directory."""
     os.environ["AGENT_TABS_HOME"] = str(state_dir)
     import agent_tabs.snapshot as snap_mod
+
     return importlib.reload(snap_mod)
 
 
 def snap_with(agent_tabs: int, captured_at="2026-01-01T00:00:00+00:00") -> dict:
     tabs = [
-        {"tab_index": i + 1, "pane_index": 1, "title": f"t{i}", "kind": "claude",
-         "session_id": f"id{i}", "cwd": "/repo", "restore": f"claude --resume id{i}"}
+        {
+            "tab_index": i + 1,
+            "pane_index": 1,
+            "title": f"t{i}",
+            "kind": "claude",
+            "session_id": f"id{i}",
+            "cwd": "/repo",
+            "restore": f"claude --resume id{i}",
+        }
         for i in range(agent_tabs)
     ]
-    tabs.append({"tab_index": 99, "pane_index": 1, "title": "shell", "kind": "shell",
-                 "session_id": None, "cwd": "/tmp", "restore": "cd /tmp"})
-    return {"version": 1, "captured_at": captured_at,
-            "windows": [{"window_index": 1, "window_id": "1", "tabs": tabs}]}
+    tabs.append(
+        {
+            "tab_index": 99,
+            "pane_index": 1,
+            "title": "shell",
+            "kind": "shell",
+            "session_id": None,
+            "cwd": "/tmp",
+            "restore": "cd /tmp",
+        }
+    )
+    return {
+        "version": 1,
+        "captured_at": captured_at,
+        "windows": [{"window_index": 1, "window_id": "1", "tabs": tabs}],
+    }
 
 
 def test_empty_capture_never_overwrites_a_good_snapshot():
