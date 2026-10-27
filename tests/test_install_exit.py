@@ -207,5 +207,35 @@ def test_the_suite_does_not_touch_the_real_install():
     assert before == after, "the tests wrote the real launchd plist"
 
 
+def test_a_line_separator_cannot_get_another_process_signalled():
+    # ps passes U+2028 in argv through. Split on it, a holder whose argument is
+    # "x<U+2028><decoy pid> <legacy path>" forges a line naming the decoy next
+    # to the legacy path, and install would SIGTERM the decoy. Real ps, real
+    # processes, both this test's own.
+    import sys as _sys
+    import time
+
+    with tempfile.TemporaryDirectory() as tmp:
+        original = install.LEGACY_AUTOLAUNCH
+        install.LEGACY_AUTOLAUNCH = Path(tmp) / "legacy" / "agent_tabs_recorder.py"
+        decoy = subprocess.Popen([_sys.executable, "-c", "import time; time.sleep(30)"])
+        holder = subprocess.Popen(
+            [
+                _sys.executable,
+                "-c",
+                "import time; time.sleep(30)",
+                f"x\u2028{decoy.pid} {install.LEGACY_AUTOLAUNCH}",
+            ]
+        )
+        try:
+            time.sleep(0.5)
+            install._stop_legacy_processes()
+            assert decoy.poll() is None, "install signalled a process named only by a forged line"
+        finally:
+            install.LEGACY_AUTOLAUNCH = original
+            holder.kill()
+            decoy.kill()
+
+
 if __name__ == "__main__":
     raise SystemExit(run(globals()))
