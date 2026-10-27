@@ -153,10 +153,11 @@ an issue.
 - Never let a capture with no agent sessions overwrite a good snapshot, nor a
   collapsed one until the drop has persisted: the run of consecutive collapsed
   captures ending at the newest holds at least `COLLAPSE_STREAK` captures AND
-  spans at least `COLLAPSE_SETTLE_SECONDS`. Keep both. The count stops a gap (a
-  shutdown capture, then the first after boot) supplying the time; the span
-  stops a burst supplying the count. Walk the whole run by time, never a fixed
-  window, or short intervals never accept.
+  spans at least `COLLAPSE_SETTLE_SECONDS`. Keep both: with the count, a gap
+  alone (a shutdown capture, then the first after boot) is not enough; with the
+  span, a burst alone is not. Walk the whole run by time, never a fixed window,
+  or short intervals never accept. An empty capture is never the last good
+  count: 0 would switch the guard off.
 - Keep history by age with a floor: every capture younger than
   `HISTORY_WINDOW_SECONDS`, never fewer than the newest `HISTORY_MIN`. Age
   alone would empty history on the first capture after a long sleep, which is
