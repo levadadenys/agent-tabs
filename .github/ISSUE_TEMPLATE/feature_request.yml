@@ -1,0 +1,15 @@
+name: Feature request
+description: A new agent CLI, a terminal, or an idea
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like agent-tabs to do?
+    validations:
+      required: true
+  - type: textarea
+    id: agent
+    attributes:
+      label: For a new agent CLI
+      description: Where it keeps its sessions on disk, how a running process can be tied to its session id (an open file, a file named by pid, an argument), and the command that resumes a session.
