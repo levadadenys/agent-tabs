@@ -264,17 +264,6 @@ def cmd_restore_all(args, snap, live) -> int:
 def cmd_restore(args) -> int:
     if not args.go:
         return _cmd_restore(args)
-    # The tab restore runs from is found through its terminal. Without one, the
-    # only thing keeping restore out of that tab is that it is busy, and
-    # --force turns that off.
-    if args.force and restore_mod.current_tty() is None:
-        print(
-            "Refusing --go --force without a terminal: restore cannot tell which "
-            "tab it is running from, and --force would let it type into that tab. "
-            "Run it from an iTerm tab, or drop --force.",
-            file=sys.stderr,
-        )
-        return 2
     # Only an executing restore types into tabs, so only it needs the lock; a
     # dry run can always be read, even while another restore is running.
     try:
@@ -302,6 +291,18 @@ def _cmd_restore(args) -> int:
     snap = snap_mod.load(Path(args.file) if args.file else None)
     _warn_if_replaced(snap)
     live = restore_mod.live_tabs()
+    # restore finds the tab it runs from through its terminal. With no terminal,
+    # or one iTerm does not own (tmux, ssh), it cannot, and then only that tab
+    # being busy keeps restore out of it -- exactly what --force turns off.
+    if args.go and args.force and restore_mod.current_window_id(live) is None:
+        print(
+            "Refusing --go --force: restore cannot find the iTerm tab it is running "
+            "from (no terminal, or one iTerm does not own, such as tmux or ssh), and "
+            "--force would let it type into that tab. Run it from an iTerm tab, or "
+            "drop --force.",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.all:
         return cmd_restore_all(args, snap, live)
