@@ -10,11 +10,32 @@ from __future__ import annotations
 import subprocess
 import time
 
-# ASCII unit separator: a terminal strips control characters from titles, so
-# unlike a printable delimiter this cannot collide with tab content and
-# silently drop a whole row.
+# ASCII unit separator between fields, linefeed between rows. A tab title is
+# the one field a program controls (any process can set its tab's title), so
+# CLEAN_HANDLER replaces every control character and line separator in it with
+# a space before it is emitted: a title can never carry a forged row. By code
+# point (`id of t`), not with text item delimiters: those match whole grapheme
+# clusters, so a linefeed followed by a combining mark was never matched.
 FIELD = "\x1f"
 FIELD_AS = "(character id 31)"
+
+CLEAN_HANDLER = """
+on clean(t)
+    if t is "" then return ""
+    set ids to id of t
+    if class of ids is integer then set ids to {ids}
+    set out to {}
+    repeat with c in ids
+        set c to contents of c
+        if c < 32 or (c > 126 and c < 160) or c = 8232 or c = 8233 then
+            set end of out to 32
+        else
+            set end of out to c
+        end if
+    end repeat
+    return character id out
+end clean
+"""
 
 
 class ITermError(RuntimeError):
@@ -22,17 +43,13 @@ class ITermError(RuntimeError):
 
 
 def _osascript(script: str) -> str:
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    # Bytes, decoded here: text mode translates a CR into a newline, which
+    # would turn a CR inside a title into a row break.
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, check=False)
     if result.returncode != 0:
-        raise ITermError(result.stderr.strip() or "osascript failed")
-    return result.stdout
+        stderr = result.stderr.decode("utf-8", "replace").strip()
+        raise ITermError(stderr or "osascript failed")
+    return result.stdout.decode("utf-8", "replace")
 
 
 def _as_id(window_id: str) -> str:
@@ -45,7 +62,9 @@ def _escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
-ENUMERATE = f"""
+ENUMERATE = (
+    CLEAN_HANDLER
+    + f"""
 tell application "iTerm2"
     set out to ""
     set wi to 0
@@ -57,13 +76,14 @@ tell application "iTerm2"
             set si to 0
             repeat with s in sessions of tb
                 set si to si + 1
-                set out to out & wi & {FIELD_AS} & (id of win) & {FIELD_AS} & ti & {FIELD_AS} & si & {FIELD_AS} & (tty of s) & {FIELD_AS} & (name of s) & linefeed
+                set out to out & wi & {FIELD_AS} & (id of win) & {FIELD_AS} & ti & {FIELD_AS} & si & {FIELD_AS} & (tty of s) & {FIELD_AS} & (my clean(name of s)) & linefeed
             end repeat
         end repeat
     end repeat
     return out
 end tell
 """
+)
 
 
 def is_running() -> bool:
@@ -98,24 +118,42 @@ def enumerate_tabs() -> list[dict]:
 
 
 def _enumerate_once() -> list[dict]:
+    """Parse the listing, refusing anything that is not exactly one row per pane.
+
+    Restore decides which tabs are busy from these rows, so a forged row could
+    make a busy tab look idle. Titles are cleaned in the script; this is the
+    second line of defence: newlines only (never splitlines(), which also
+    breaks on U+2028 and the like), and a malformed or repeated row fails the
+    whole listing rather than being skipped or guessed at.
+    """
     rows = []
-    for line in _osascript(ENUMERATE).splitlines():
-        if not line.strip():
+    seen: set[tuple[str, int, int]] = set()
+    for line in _osascript(ENUMERATE).split("\n"):
+        # Only a truly empty line (the end of the output) is skipped: str.strip()
+        # counts the field separator as whitespace, so a row of nothing but
+        # separators would vanish instead of failing the listing.
+        if line == "":
             continue
         parts = line.split(FIELD)
         if len(parts) != 6:
-            continue
+            raise ITermError(f"unexpected row in the tab listing: {line!r}")
         window_index, window_id, tab_index, pane_index, tty, title = parts
-        rows.append(
-            {
+        try:
+            key = (window_id, int(tab_index), int(pane_index))
+            row = {
                 "window_index": int(window_index),
                 "window_id": window_id,
-                "tab_index": int(tab_index),
-                "pane_index": int(pane_index),
+                "tab_index": key[1],
+                "pane_index": key[2],
                 "tty": tty.strip(),
                 "title": title.strip(),
             }
-        )
+        except ValueError:
+            raise ITermError(f"unexpected row in the tab listing: {line!r}") from None
+        if key in seen:
+            raise ITermError(f"the tab listing names window {key[0]} tab {key[1]} twice")
+        seen.add(key)
+        rows.append(row)
     return rows
 
 

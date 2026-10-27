@@ -41,8 +41,8 @@ Where it types:
   refused there;
 - never a session already running in any iTerm pane, `--force` or not.
 
-Process listings are parsed so that one process's command line cannot pose as another process
-on another tab. Busy tabs and running sessions are read again just before typing starts, so the plan is not
+Process and tab listings are parsed so that neither a process's command line nor a tab's title,
+which any program can set, can pose as another process or another tab. Busy tabs and running sessions are read again just before typing starts, so the plan is not
 trusted blindly.
 
 Out of scope: anyone who can already write to `~/.agent-tabs/` as you, or type into your
