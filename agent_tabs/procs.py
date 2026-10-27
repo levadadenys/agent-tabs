@@ -80,9 +80,7 @@ def by_tty(procs: list[Proc]) -> dict[str, list[Proc]]:
     return grouped
 
 
-def foreground_proc(
-    procs: list[Proc], priority: frozenset[str] = frozenset()
-) -> Proc | None:
+def foreground_proc(procs: list[Proc], priority: frozenset[str] = frozenset()) -> Proc | None:
     """Pick the process that represents what the tab is *doing*.
 
     A name in `priority` always wins, because agents spawn helper children --
