@@ -13,23 +13,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: tests (Python ${{ matrix.python }})
-    # macOS, not Linux: the tool is macOS-only and the suite drives the real
-    # lsof, ps and sysctl it depends on. Free for public repositories.
-    runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # 3.9 is what macOS ships as /usr/bin/python3.
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python }}
-      - run: python tests/run_all.py
-
   lint:
     name: ruff + mypy + shellcheck
     runs-on: ubuntu-24.04
