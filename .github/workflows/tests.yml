@@ -1,0 +1,48 @@
+name: Tests
+
+# The macOS suite, split from ci.yml so it can skip changes that cannot affect
+# it. Lint and the gitleaks scan stay in ci.yml and run on every change: a leak
+# can be in a doc as easily as in code.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agent_tabs/**"
+      - "bin/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - ".github/workflows/tests.yml"
+  pull_request:
+    paths:
+      - "agent_tabs/**"
+      - "bin/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - ".github/workflows/tests.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (Python ${{ matrix.python }})
+    # macOS, not Linux: the tool is macOS-only and the suite drives the real
+    # lsof, ps, sysctl and osascript it depends on.
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The bounds of the supported range. Standard library only, so the
+        # versions in between have not broken on their own; 3.9 has, often
+        # (it is macOS's /usr/bin/python3). Bump the newest as Python releases.
+        python: ["3.9", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python tests/run_all.py
