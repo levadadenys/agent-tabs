@@ -24,8 +24,7 @@ class Sandbox:
     real CLI/skill symlinks -- running the tests would mutate a live install.
     """
 
-    ATTRS = ("AGENT_DIR", "AGENT_PLIST", "BIN_DIR", "SKILL_DST", "LOG",
-             "LEGACY_AUTOLAUNCH")
+    ATTRS = ("AGENT_DIR", "AGENT_PLIST", "BIN_DIR", "SKILL_DST", "LOG", "LEGACY_AUTOLAUNCH")
 
     def __init__(self, returncode: int, err: str = ""):
         self.returncode, self.err = returncode, err
@@ -106,14 +105,16 @@ def test_a_running_legacy_recorder_is_stopped():
     # would then capture every 30s and race on snapshot.json.
     import subprocess
     import time
+
     with Sandbox(0):
         script = install.LEGACY_AUTOLAUNCH
         script.parent.mkdir(parents=True, exist_ok=True)
         script.write_text("import time\ntime.sleep(60)\n")
         proc = subprocess.Popen([sys.executable, str(script)])
         for _ in range(50):
-            listing = subprocess.run(["ps", "-Ao", "pid=,command="],
-                                     capture_output=True, text=True).stdout
+            listing = subprocess.run(
+                ["ps", "-Ao", "pid=,command="], capture_output=True, text=True
+            ).stdout
             if any(script.name in l and str(proc.pid) in l for l in listing.splitlines()):
                 break
             time.sleep(0.1)
@@ -136,6 +137,7 @@ def test_an_unrelated_process_with_the_same_basename_is_spared():
     import subprocess
     import tempfile
     import time
+
     with Sandbox(0):
         other_dir = tempfile.mkdtemp()
         decoy = Path(other_dir) / install.LEGACY_AUTOLAUNCH.name
@@ -174,6 +176,7 @@ def test_a_failed_reinstall_restores_the_previous_job():
 
 def test_worktree_without_git_refuses_rather_than_baking_a_doomed_path():
     import subprocess as sp
+
     original = install.REPO
     try:
         with tempfile.TemporaryDirectory() as tmp:
