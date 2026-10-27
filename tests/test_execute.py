@@ -10,8 +10,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import iterm, restore, snapshot as snap_mod  # noqa: E402
-from runner import run  # noqa: E402
+from runner import run
+
+from agent_tabs import iterm, restore
+from agent_tabs import snapshot as snap_mod
 
 
 class FakeITerm:
@@ -203,7 +205,7 @@ def test_an_unusable_state_dir_is_a_message_not_a_traceback():
 
 
 def test_two_restores_cannot_run_at_once():
-    import os, tempfile
+    import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         original = snap_mod.STATE_DIR
         snap_mod.STATE_DIR = Path(tmp)
