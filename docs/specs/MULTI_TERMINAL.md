@@ -231,8 +231,9 @@ Effort assumes the interface exists. S is days, M about a week, L more.
     which the prose docs do not spell out.
   - Whether `send-text` reports a missing window: the docs say errors are not
     reported.
-  - That `--stdin` text arrives literally, with Enter, and without
-    bracketed-paste framing.
+  - That `--stdin` text arrives literally and without bracketed-paste
+    framing, and that Enter needs an explicit `\r` (a trailing `\n` is not
+    a keypress).
   - The process join is by **pid**: see "Process join" above.
 - **Effort:** S–M for the code, plus documentation of the trade-off.
 
@@ -281,11 +282,14 @@ Effort assumes the interface exists. S is days, M about a week, L more.
   the command name can contain spaces and parentheses. It gives the ppid,
   `tty_nr` and `tpgid` (the foreground process group, which identifies the
   foreground process more directly than today's walk down from the shell).
-  `tty_nr` is a device number, not a name: map it through its major and minor
-  numbers to `pts/N`. Not via `readlink /proc/<pid>/fd/0`: a foreground command
-  can redirect stdin to a file and still own the terminal, and joining on stdin
-  would hide that live work from the busy check. A device that cannot be
-  resolved counts as busy.
+  `tty_nr` is a device number, not a name, so join on the device itself:
+  a process belongs to a pane when `os.stat(pane_tty).st_rdev == tty_nr`. Both
+  use the kernel's dev_t encoding, so pts, console and serial ttys all work with
+  no name mapping. Not via `readlink /proc/<pid>/fd/0`: a foreground command can
+  redirect stdin to a file and still own the terminal, and joining on stdin
+  would hide that live work from the busy check. **A pane whose tty cannot be
+  stat'd counts as busy.** That reverses today's `is_busy(None) == False` for
+  that case, so it needs its own test.
 - **Argv:** read from `/proc/<pid>/cmdline`, which is NUL-separated, so argument
   boundaries survive. They cannot be *replayed* as such, though. Restore types
   one line into a shell, preserving boundaries would need quoting, and the
@@ -325,8 +329,10 @@ cannot pass on one layer while production uses the other.
 7. **Ghostty**, when it exposes a tty or pid. Worth an upstream request now.
 
 **Do not build** a backend that cannot give a stable window id, a pane-to-
-process join, and literal typing into a chosen pane. Every safety rule rests on
-those three.
+process join, and literal typing into a chosen tab. Every safety rule rests on
+those three. Typing goes to a tab's active pane (tmux `send-keys -t @N`), which
+is safe only because busy is computed across *all* panes of the tab, as
+`execute` does now (`busy_now` is keyed by tab).
 
 ## Decision needed
 
