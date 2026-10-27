@@ -201,10 +201,11 @@ snapshot matters most is a shutdown, when tabs die one at a time:
 
 - a capture with **no** agent sessions is never promoted;
 - a capture that **collapsed** — kept less than 67% of the last good one's
-  sessions — is held back until the drop has lasted three captures and at least
-  45 seconds, about a minute in practice. A shutdown is over long before that.
-  Genuinely closing most of your sessions is accepted after that minute; closing
-  a tab or two is promoted immediately.
+  sessions — is held back until the drop has lasted three captures in a row and
+  at least 45 seconds: about a minute at the default interval, 50 seconds at
+  10 s, 10 minutes at 300 s. A shutdown is over long before that. Genuinely
+  closing most of your sessions is accepted after that; closing a tab or two is
+  promoted immediately.
 
 **Across a reboot**, the first promotion after boot pins the pre-reboot fleet
 in `pre-boot.json`: the fuller of the outgoing `snapshot.json` and the fullest

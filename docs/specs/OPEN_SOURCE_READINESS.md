@@ -1,7 +1,7 @@
 # Spec: open-source readiness
 
-**Status:** reviewed 2026-10-27. Part 1: items 1–3 and 5 implemented (`feat/snapshot-interval`);
-item 4, the collapse guard, follows in its own PR. Part 2: in progress. Written 2026-10-08,
+**Status:** reviewed 2026-10-27. Part 1: implemented, items 1–3 and 5 in #13, item 4 (the
+collapse guard) in `fix/collapse-guard-by-time`. Part 2: in progress. Written 2026-10-08,
 against `main` at the merge of #5.
 
 Two parts: a configurable snapshot interval, which other people will want, and

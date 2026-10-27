@@ -13,7 +13,8 @@ a crash or reboot.
   the title, and the Claude, Codex or Grok session running there. It needs no iTerm restart and
   survives iTerm restarts (#2).
 - A capture taken while tabs die during a shutdown cannot overwrite a good snapshot: one with no
-  agent sessions is never promoted, and a collapsed one only once the drop has persisted (#3).
+  agent sessions is never promoted, and a collapsed one only once the drop has persisted (#3):
+  three captures in a row over at least 45 seconds, at any capture interval.
 - The last snapshot from before a reboot is pinned in `pre-boot.json`, so starting a session
   before restoring does not lose the pre-reboot fleet (#5).
 - Codex sessions resume under the account they ran as, derived from the rollout file's path

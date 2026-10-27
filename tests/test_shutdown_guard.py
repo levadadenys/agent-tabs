@@ -230,6 +230,107 @@ def test_a_collapse_spanning_the_settle_window_is_accepted():
         assert latest is not None, "a collapse that genuinely persisted was blocked"
 
 
+def history(m, full_ago: float, collapsed_ago: list) -> None:
+    """A full capture and collapsed ones, as save() would have named them that
+    many seconds ago. Archive times come from names, so real-clock names would
+    put every capture at "now" and a span of about 0 s."""
+    import json
+    from datetime import datetime, timedelta
+    from datetime import timezone as tz
+
+    m.save(snap(22, "FULL"))
+    now = datetime.now(tz.utc)
+    for archive in m.HISTORY_DIR.glob("*.json"):
+        archive.unlink()
+    for ago, agents in [(full_ago, 22)] + [(a, 3) for a in collapsed_ago]:
+        stamp = (now - timedelta(seconds=ago)).strftime("%Y%m%dT%H%M%S%f")
+        (m.HISTORY_DIR / f"{stamp}.json").write_text(json.dumps(snap(agents, f"at-{ago}")))
+
+
+def settles(collapsed_ago: list, full_ago: float = 3600) -> bool:
+    """With the real settle time, does one more collapsed capture now promote?"""
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp), settle=45)
+        history(m, full_ago, collapsed_ago)
+        latest, _ = m.save(snap(3, "now"))
+        return latest is not None
+
+
+def test_at_10_seconds_a_genuine_drop_is_accepted():
+    # Three captures 10 s apart span 20 s, under the 45 s settle: a guard that
+    # read a fixed three archives never accepted at this interval.
+    assert not settles([30, 20, 10]), "accepted after 30 s, under the settle time"
+    assert settles([50, 40, 30, 20, 10]), "a drop persisting 50 s at 10 s was never accepted"
+
+
+def test_at_300_seconds_three_captures_are_needed():
+    assert not settles([300]), "two captures accepted: a gap supplied the time"
+    assert settles([600, 300]), "three captures over 10 minutes were not enough"
+
+
+def test_a_collapse_either_side_of_a_reboot_does_not_promote():
+    # A half-dead capture from the shutdown, then the first small one after
+    # boot: two collapsed captures hours apart. Time alone would accept them;
+    # the pre-boot pin cannot be relied on to have saved the fleet first.
+    assert not settles([3 * 3600], full_ago=4 * 3600), "a reboot gap promoted a collapse"
+    assert settles([3 * 3600, 30], full_ago=4 * 3600), "a third capture should complete it"
+
+
+def test_a_healthy_capture_inside_the_run_restarts_it():
+    # The run is consecutive: a recovery between collapses breaks it.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp), settle=45)
+        history(m, 3600, [120, 90])
+        import json
+        from datetime import datetime, timedelta
+        from datetime import timezone as tz
+
+        stamp = (datetime.now(tz.utc) - timedelta(seconds=60)).strftime("%Y%m%dT%H%M%S%f")
+        (m.HISTORY_DIR / f"{stamp}.json").write_text(json.dumps(snap(22, "recovered")))
+        latest, _ = m.save(snap(3, "now"))
+        assert latest is None, "a run broken by a recovery was still accepted"
+    assert settles([120, 90, 60]), "setup: the same run without the recovery promotes"
+
+
+def test_a_stray_unparseable_archive_does_not_block_a_genuine_drop():
+    # Walked by the time in each name, a name with no time sorts oldest and
+    # is never reached; by filename it would sort newest and stop every run.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp), settle=45)
+        history(m, 3600, [90, 60, 30])
+        (m.HISTORY_DIR / "stray.json").write_text("{}")
+        latest, _ = m.save(snap(3, "now"))
+        assert latest is not None, "a stray file blocked a genuine drop"
+
+
+def test_an_unreadable_capture_inside_the_run_stops_it():
+    # Skipping it would let the captures either side add up to a promotion;
+    # an entry that cannot be read must delay one, never license it.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp), settle=45)
+        history(m, 3600, [90, 60, 30])
+        middle = sorted(m.HISTORY_DIR.glob("*.json"))[2]  # the capture 60 s ago
+        middle.write_text("garbage")
+        latest, _ = m.save(snap(3, "now"))
+        assert latest is None, "an unreadable capture was skipped over"
+    assert settles([90, 60, 30]), "setup: the same run, readable, promotes"
+
+
+def test_an_empty_capture_never_counts_as_the_last_good_one():
+    # With snapshot.json unreadable the guard falls back to history. If the
+    # newest archive is an empty capture (iTerm closed, say), taking its 0 as
+    # the last good count switched the guard off: the next small capture
+    # replaced the whole fleet.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh(Path(tmp), settle=45)
+        history(m, 3600, [])
+        m.save(snap(0, "empty"))
+        m.LATEST.write_text("garbage")
+        latest, _ = m.save(snap(3, "small"))
+        assert latest is None, "an empty archive switched the collapse guard off"
+    assert settles([90, 60, 30]), "setup: a persisted drop still promotes"
+
+
 def test_concurrent_saves_do_not_corrupt_the_decision():
     # Two captures can overlap (a manual snapshot racing the 30s tick). With no
     # read-modify-write state there is nothing to lose an update on.

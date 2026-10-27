@@ -39,12 +39,20 @@ HISTORY_CAP = HISTORY_WINDOW_SECONDS // 10
 # reads as a collapse, delaying the snapshot by the settle window. Safe
 # direction, but the two cases are not distinguishable by ratio alone.
 COLLAPSE_RATIO = 0.67
-# Consecutive collapsed captures before we believe it. At 30s each, a shutdown
-# is over long before this, so it cannot overwrite a good snapshot.
+# A collapse is believed once the run of consecutive collapsed captures ending
+# at the newest one holds at least COLLAPSE_STREAK captures AND spans at least
+# COLLAPSE_SETTLE_SECONDS. Each rule covers what the other cannot, at any
+# recorder interval:
+# - the count means a gap alone is not enough: a half-dead capture from a
+#   shutdown and the first small one after boot are two collapsed captures far
+#   more than 45 s apart, and at least three must have seen the drop. The
+#   pre-boot pin is the backstop, not a guarantee: it is skipped when the boot
+#   time cannot be read;
+# - the span means a burst alone is not enough: several captures can land at
+#   once (a manual snapshot racing the launchd tick).
+# The whole run is walked, not a fixed window of COLLAPSE_STREAK archives: at a
+# 10 s interval three captures span 20 s, so a fixed window never accepted.
 COLLAPSE_STREAK = 3
-# ...and spanning at least this long. Counting captures is not the same as the
-# collapse persisting: several captures can land at once (a manual snapshot
-# racing the launchd tick), which would satisfy a pure count instantly.
 COLLAPSE_SETTLE_SECONDS: float = 45
 
 # Both derive from adapters, which owns the definition of "is an agent".
@@ -283,15 +291,17 @@ def _last_good_count(exclude: Path | None = None) -> int | None:
     collapse guard off exactly when the state is already suspect. The capture
     being judged is excluded, or it would compare against itself.
     """
+    # An empty capture is never the last good one: a count of 0 would make the
+    # caller's `if previous` false and switch the collapse guard off.
     if LATEST.exists():
         count = _count_of(LATEST)
-        if count is not None:
+        if count:
             return count
-    for archive in sorted(HISTORY_DIR.glob("*.json"), reverse=True):
+    for archive in reversed(_history_by_time()):
         if exclude is not None and archive == exclude:
             continue
         count = _count_of(archive)
-        if count is not None:
+        if count:
             return count
     return None
 
@@ -304,22 +314,33 @@ def _archive_time(path: Path) -> datetime | None:
         return None
 
 
-def _recent_entries(limit: int) -> list[tuple[int, datetime]] | None:
-    """Counts from the newest `limit` archives, or None if any is unreadable.
+def _collapse_persisted(floor: float) -> bool:
+    """Has the run of collapsed captures ending at the newest lasted long enough?
+
+    Walks history newest first, by the time in each name, through consecutive
+    captures that are collapsed (more than zero, fewer than `floor`), and stops
+    at the first that is not, or that cannot be read: an unreadable entry must
+    delay a promotion, never license one. Stops as soon as the run qualifies,
+    so a capture reads only as many archives as it needs.
 
     History replaces a hand-kept streak counter: it is append-only, uniquely
     named, and written before this decision, so there is no second piece of
     mutable state to corrupt, race, or wedge.
     """
-    archives = sorted(HISTORY_DIR.glob("*.json"), reverse=True)[:limit]
-    entries = []
-    for archive in archives:
-        count = _count_of(archive)
+    newest: datetime | None = None
+    length = 0
+    for archive in reversed(_history_by_time()):
         when = _archive_time(archive)
-        if count is None or when is None:
-            return None
-        entries.append((count, when))
-    return entries
+        count = _count_of(archive)
+        if when is None or count is None or not 0 < count < floor:
+            return False
+        newest = newest or when
+        length += 1
+        if length >= COLLAPSE_STREAK and (newest - when).total_seconds() >= (
+            COLLAPSE_SETTLE_SECONDS
+        ):
+            return True
+    return False
 
 
 def _write_atomic(path: Path, snap: dict) -> None:
@@ -371,9 +392,10 @@ def save(snap: dict) -> tuple[Path | None, Path]:
 
     - a capture with no agent sessions is never promoted;
     - a capture that has collapsed relative to the last good one is not
-      promoted until it repeats, so a half-dead shutdown state cannot overwrite
-      a full one. A genuine drop is accepted after COLLAPSE_STREAK captures; a
-      shutdown never lasts that long.
+      promoted until it persists, so a half-dead shutdown state cannot
+      overwrite a full one. A genuine drop is accepted once the collapsed run
+      holds COLLAPSE_STREAK captures over COLLAPSE_SETTLE_SECONDS; a shutdown
+      is over long before that.
     """
     # Microseconds: two captures in the same second must not collide.
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
@@ -391,17 +413,10 @@ def save(snap: dict) -> tuple[Path | None, Path]:
 
     previous = _last_good_count(exclude=archive)
     if previous and count < previous * COLLAPSE_RATIO:
-        floor = previous * COLLAPSE_RATIO
-        recent = _recent_entries(COLLAPSE_STREAK)
         # Promote only once the collapse has persisted, in both captures and
-        # wall-clock time. A zero capture or a recovery inside the window
-        # breaks the run by itself, so gaps and blips need no bookkeeping.
-        persistent = False
-        if recent is not None and len(recent) >= COLLAPSE_STREAK:
-            if all(0 < c < floor for c, _ in recent):
-                span = (recent[0][1] - recent[-1][1]).total_seconds()
-                persistent = span >= COLLAPSE_SETTLE_SECONDS
-        if not persistent:
+        # wall-clock time. A zero capture or a recovery inside the run breaks
+        # it by itself, so gaps and blips need no bookkeeping.
+        if not _collapse_persisted(previous * COLLAPSE_RATIO):
             return None, archive
 
     _pin_pre_boot(snap)
