@@ -87,6 +87,7 @@ def test_a_damaged_config_never_breaks_a_codex_capture():
             b"5",
             b"null",
             b"[1, 2]",
+            b"[" * 100000,
             b'{"codex_profiles": []}',
             b'{"codex_profiles": [1]}',
             b'{"codex_profiles": "abc"}',
