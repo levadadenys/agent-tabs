@@ -41,8 +41,15 @@ def age_of(captured_at: str) -> str:
     return f"{hours // 24}d {hours % 24}h ago"
 
 
-KIND_MARK = {"claude": "C", "codex": "X", "grok": "G", "ssh": "S",
-             "shell": ".", "command": ">", "empty": " "}
+KIND_MARK = {
+    "claude": "C",
+    "codex": "X",
+    "grok": "G",
+    "ssh": "S",
+    "shell": ".",
+    "command": ">",
+    "empty": " ",
+}
 
 
 def cmd_snapshot(args) -> int:
@@ -148,10 +155,7 @@ def _print_plan(window, actions, warnings) -> None:
 
 
 def _warnings_for(window: dict) -> dict:
-    return {
-        t["tab_index"]: t["warning"]
-        for t in window.get("tabs", []) if t.get("warning")
-    }
+    return {t["tab_index"]: t["warning"] for t in window.get("tabs", []) if t.get("warning")}
 
 
 def cmd_restore_all(args, snap, live) -> int:
@@ -311,9 +315,7 @@ def _cmd_restore(args) -> int:
             return 2
         target_label = f"live window {restore_mod.current_window_index(live)}"
 
-    actions = restore_mod.plan(
-        window, live, target, args.force, restore_mod.running_sessions()
-    )
+    actions = restore_mod.plan(window, live, target, args.force, restore_mod.running_sessions())
     runnable = [a for a in actions if a.will_run]
 
     # Staleness matters most in exactly the situation this command is used in:
@@ -354,12 +356,15 @@ def main() -> int:
     p_list = sub.add_parser("list", help="show what the last snapshot holds")
     p_list.add_argument("-f", "--file", help="read a specific snapshot file")
     p_list.add_argument(
-        "-k", "--kind", action="append",
+        "-k",
+        "--kind",
+        action="append",
         choices=list(adapters.ALL_KINDS),
         help="only show tabs of this kind (repeatable)",
     )
     p_list.add_argument(
-        "--commands", action="store_true",
+        "--commands",
+        action="store_true",
         help="print bare restore commands, one per line",
     )
     p_list.set_defaults(func=cmd_list)
@@ -370,14 +375,18 @@ def main() -> int:
     p_restore.add_argument("--go", action="store_true", help="actually run (default is a dry run)")
     p_restore.add_argument("--new-window", action="store_true", help="build a fresh window")
     p_restore.add_argument(
-        "--all", action="store_true",
+        "--all",
+        action="store_true",
         help="restore every live window that matches a snapshot window",
     )
     p_restore.add_argument(
-        "--create-missing", action="store_true",
+        "--create-missing",
+        action="store_true",
         help="with --all: rebuild snapshot windows nothing matched in new windows",
     )
-    p_restore.add_argument("--force", action="store_true", help="overwrite tabs already running an agent")
+    p_restore.add_argument(
+        "--force", action="store_true", help="overwrite tabs already running an agent"
+    )
     p_restore.set_defaults(func=cmd_restore)
 
     p_install = sub.add_parser("install", help="install the recorder and CLI")

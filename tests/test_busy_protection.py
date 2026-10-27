@@ -26,14 +26,29 @@ def test_agent_processes_are_busy():
 
 def test_non_agent_work_is_also_busy():
     # The regression the reviewers found: these were all treated as free.
-    for command in ("ssh prod-box", "vim notes.txt", "psql postgres://db",
-                    "tail -f log", "docker attach web", "python3 manage.py"):
+    for command in (
+        "ssh prod-box",
+        "vim notes.txt",
+        "psql postgres://db",
+        "tail -f log",
+        "docker attach web",
+        "python3 manage.py",
+    ):
         assert restore.is_busy(proc(command)), command
 
 
 def test_idle_shells_are_not_busy():
-    for command in ("-zsh", "zsh", "bash", "-bash", "fish", "tcsh", "ksh", "dash",
-                    "/usr/bin/login -fpl someone"):
+    for command in (
+        "-zsh",
+        "zsh",
+        "bash",
+        "-bash",
+        "fish",
+        "tcsh",
+        "ksh",
+        "dash",
+        "/usr/bin/login -fpl someone",
+    ):
         assert not restore.is_busy(proc(command)), command
 
 
@@ -50,11 +65,28 @@ def test_empty_tab_is_not_busy():
 def _plan_for(live_kind: str, busy: bool):
     window = {
         "window_index": 1,
-        "tabs": [{"tab_index": 1, "pane_index": 1, "title": "A", "kind": "claude",
-                  "restore": "cd /repo && claude --resume aaa"}],
+        "tabs": [
+            {
+                "tab_index": 1,
+                "pane_index": 1,
+                "title": "A",
+                "kind": "claude",
+                "restore": "cd /repo && claude --resume aaa",
+            }
+        ],
     }
-    live = [{"window_index": 1, "window_id": "w1", "tab_index": 1, "pane_index": 1, "tty": "/dev/ttys001",
-             "title": "A", "kind": live_kind, "busy": busy}]
+    live = [
+        {
+            "window_index": 1,
+            "window_id": "w1",
+            "tab_index": 1,
+            "pane_index": 1,
+            "tty": "/dev/ttys001",
+            "title": "A",
+            "kind": live_kind,
+            "busy": busy,
+        }
+    ]
     restore.current_tty = lambda: "ttys999"  # type: ignore[assignment]
     return restore.plan(window, live, "w1", force=False)[0]
 

@@ -16,18 +16,40 @@ from agent_tabs import restore
 
 
 def snap(*windows):
-    return {"windows": [
-        {"window_index": i + 1, "tabs": [
-            {"tab_index": j + 1, "pane_index": 1, "title": t, "kind": "claude",
-             "restore": f"claude --resume {t}"}
-            for j, t in enumerate(titles)]}
-        for i, titles in enumerate(windows)]}
+    return {
+        "windows": [
+            {
+                "window_index": i + 1,
+                "tabs": [
+                    {
+                        "tab_index": j + 1,
+                        "pane_index": 1,
+                        "title": t,
+                        "kind": "claude",
+                        "restore": f"claude --resume {t}",
+                    }
+                    for j, t in enumerate(titles)
+                ],
+            }
+            for i, titles in enumerate(windows)
+        ]
+    }
 
 
 def live(*titles, window=1):
-    return [{"window_index": window, "window_id": f"w{window}", "tab_index": i + 1, "pane_index": 1,
-             "tty": f"/dev/ttys00{i}", "title": t, "kind": None, "busy": False}
-            for i, t in enumerate(titles)]
+    return [
+        {
+            "window_index": window,
+            "window_id": f"w{window}",
+            "tab_index": i + 1,
+            "pane_index": 1,
+            "tty": f"/dev/ttys00{i}",
+            "title": t,
+            "kind": None,
+            "busy": False,
+        }
+        for i, t in enumerate(titles)
+    ]
 
 
 def test_picks_the_window_with_the_most_shared_titles():

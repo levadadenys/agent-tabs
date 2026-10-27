@@ -24,12 +24,30 @@ REAL_RUNNING_SESSIONS = restore.running_sessions
 WINDOW = {
     "window_index": 1,
     "tabs": [
-        {"tab_index": 1, "pane_index": 1, "title": "A", "kind": "claude",
-         "session_id": "sess-a", "restore": "cd /r && claude --resume sess-a"},
-        {"tab_index": 2, "pane_index": 1, "title": "B", "kind": "codex",
-         "session_id": "sess-b", "restore": "cd /r && codex resume sess-b"},
-        {"tab_index": 3, "pane_index": 1, "title": "C", "kind": "shell",
-         "session_id": None, "restore": "cd /r"},
+        {
+            "tab_index": 1,
+            "pane_index": 1,
+            "title": "A",
+            "kind": "claude",
+            "session_id": "sess-a",
+            "restore": "cd /r && claude --resume sess-a",
+        },
+        {
+            "tab_index": 2,
+            "pane_index": 1,
+            "title": "B",
+            "kind": "codex",
+            "session_id": "sess-b",
+            "restore": "cd /r && codex resume sess-b",
+        },
+        {
+            "tab_index": 3,
+            "pane_index": 1,
+            "title": "C",
+            "kind": "shell",
+            "session_id": None,
+            "restore": "cd /r",
+        },
     ],
 }
 
@@ -64,13 +82,18 @@ def test_tabs_without_a_session_are_not_deduplicated():
 
 
 def test_running_sessions_reads_agents_from_the_live_capture():
-    live_capture = {"windows": [
-        {"window_index": 2, "tabs": [
-            {"tab_index": 1, "kind": "claude", "session_id": "s1"},
-            {"tab_index": 2, "kind": "shell", "session_id": None},
-            {"tab_index": 3, "kind": "command", "session_id": "not-an-agent"},
-        ]},
-    ]}
+    live_capture = {
+        "windows": [
+            {
+                "window_index": 2,
+                "tabs": [
+                    {"tab_index": 1, "kind": "claude", "session_id": "s1"},
+                    {"tab_index": 2, "kind": "shell", "session_id": None},
+                    {"tab_index": 3, "kind": "command", "session_id": "not-an-agent"},
+                ],
+            },
+        ]
+    }
     original = snap_mod.build
     snap_mod.build = lambda: live_capture  # type: ignore[assignment]
     try:
@@ -81,10 +104,20 @@ def test_running_sessions_reads_agents_from_the_live_capture():
 
 
 def window_of(index, sessions):
-    return {"window_index": index, "tabs": [
-        {"tab_index": i + 1, "pane_index": 1, "title": f"t{i}", "kind": "claude",
-         "session_id": sid, "restore": f"claude --resume {sid}"}
-        for i, sid in enumerate(sessions)]}
+    return {
+        "window_index": index,
+        "tabs": [
+            {
+                "tab_index": i + 1,
+                "pane_index": 1,
+                "title": f"t{i}",
+                "kind": "claude",
+                "session_id": sid,
+                "restore": f"claude --resume {sid}",
+            }
+            for i, sid in enumerate(sessions)
+        ],
+    }
 
 
 def test_a_session_in_two_windows_of_one_restore_starts_once():
@@ -137,8 +170,14 @@ class NewWindowITerm:
 
     def enumerate_tabs(self):
         return [
-            {"window_index": n, "window_id": wid, "tab_index": t + 1, "pane_index": 1,
-             "tty": f"/dev/ttys9{n}{t}", "title": ""}
+            {
+                "window_index": n,
+                "window_id": wid,
+                "tab_index": t + 1,
+                "pane_index": 1,
+                "tty": f"/dev/ttys9{n}{t}",
+                "title": "",
+            }
             for n, (wid, count) in enumerate(self.windows.items(), start=1)
             for t in range(count)
         ]

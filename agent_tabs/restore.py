@@ -104,9 +104,7 @@ def window_id_for_index(tabs: list[dict], window_index: int) -> str | None:
 # drifted immediately and missed tcsh, csh, ksh and dash. A login shell's
 # title carries a leading '-'.
 GENERIC_TITLES = frozenset(
-    name
-    for base in procs.SHELL_NAMES | procs.LOGIN_NAMES
-    for name in (base, f"-{base}")
+    name for base in procs.SHELL_NAMES | procs.LOGIN_NAMES for name in (base, f"-{base}")
 )
 
 
@@ -168,7 +166,7 @@ def select_window(snap: dict, number: int | None, live: list[dict]) -> tuple[dic
                 return window, f"snapshot window {number}"
         raise ValueError(
             f"Snapshot has no window {number}. Available: "
-            + ", ".join(str(w['window_index']) for w in windows)
+            + ", ".join(str(w["window_index"]) for w in windows)
         )
     here = current_window_index(live)
     if here is not None:
@@ -299,8 +297,7 @@ def _assign_group(
             ambiguous.add(live)
 
     claims = {
-        live: snap for live, snap in picks.items()
-        if snap is not None and live not in ambiguous
+        live: snap for live, snap in picks.items() if snap is not None and live not in ambiguous
     }
     return claims, ambiguous
 
@@ -334,9 +331,7 @@ def _assign(
     return claims
 
 
-def match_all(
-    snap: dict, live: list[dict]
-) -> tuple[list[tuple[int, dict]], list[dict], list[str]]:
+def match_all(snap: dict, live: list[dict]) -> tuple[list[tuple[int, dict]], list[dict], list[str]]:
     """Pair every live window with a snapshot window, by tab-title overlap.
 
     Returns the pairs, the snapshot windows nothing matched, and notes about
@@ -360,9 +355,7 @@ def match_all(
     for live_index in sorted({t["window_index"] for t in live}):
         overlaps = _overlaps(snap, live, live_index)
         if not overlaps:
-            notes.append(
-                f"live window {live_index}: no snapshot window matches its tab titles"
-            )
+            notes.append(f"live window {live_index}: no snapshot window matches its tab titles")
             continue
         order.append(live_index)
         scores[live_index] = overlaps
@@ -371,8 +364,9 @@ def match_all(
     claims = _assign(order, scores, notes)
     reported = {n.split(":")[0] for n in notes[already_noted:]}
     by_index = {w["window_index"]: w for w in snap.get("windows", [])}
-    pairs = [(live_index, by_index[claims[live_index]]) for live_index in order
-             if live_index in claims]
+    pairs = [
+        (live_index, by_index[claims[live_index]]) for live_index in order if live_index in claims
+    ]
     for live_index in order:
         if live_index not in claims and f"live window {live_index}" not in reported:
             notes.append(
@@ -381,9 +375,7 @@ def match_all(
             )
 
     claimed = set(claims.values())
-    unmatched = [
-        w for w in snap.get("windows", []) if w["window_index"] not in claimed
-    ]
+    unmatched = [w for w in snap.get("windows", []) if w["window_index"] not in claimed]
     return pairs, unmatched, notes
 
 
@@ -481,22 +473,20 @@ def decide_restore_all(
 
     mine = next((w for i, w in with_launcher if i == launcher), None)
     pairs = [
-        (i, w) for i, w in with_launcher
-        if i != launcher and without.get(i) == w["window_index"]
+        (i, w) for i, w in with_launcher if i != launcher and without.get(i) == w["window_index"]
     ]
     paired = {i for i, _ in pairs}
-    unsettled = sorted(
-        ({i for i, _ in with_launcher} | set(without)) - paired - {launcher}
-    )
+    unsettled = sorted(({i for i, _ in with_launcher} | set(without)) - paired - {launcher})
     # A window too tangled to solve with the launcher in keeps that reason:
     # it, not the launcher's evidence, is why it was left alone.
-    tangled = {i for i in unsettled if any(
-        n.startswith(f"live window {i}:") and "too many other windows" in n for n in notes
-    )}
+    tangled = {
+        i
+        for i in unsettled
+        if any(n.startswith(f"live window {i}:") and "too many other windows" in n for n in notes)
+    }
     # Notes about the launcher, or about a window whose note is replaced below.
     dropped = {
-        f"live window {i}:" for i in [launcher, *unsettled]
-        if i is not None and i not in tangled
+        f"live window {i}:" for i in [launcher, *unsettled] if i is not None and i not in tangled
     }
     notes = [n for n in notes if not any(n.startswith(d) for d in dropped)]
     for i in sorted(set(unsettled) - tangled):
@@ -542,7 +532,8 @@ def decide_restore_all(
     notes += list(refused.values())
     # The launcher's window is explained by its own note, not as unmatched.
     reported = [
-        w for w in unmatched
+        w
+        for w in unmatched
         if w not in create and w["window_index"] not in refused and w is not mine
     ]
     return pairs, create, reported, notes, would_create
@@ -573,9 +564,7 @@ def plan(
     own_tty = current_tty()
     busy: dict[int, dict] = {}
     if target_window is not None:
-        busy = {
-            t["tab_index"]: t for t in live if t["window_id"] == target_window
-        }
+        busy = {t["tab_index"]: t for t in live if t["window_id"] == target_window}
 
     actions: list[Action] = []
     seen_tabs: set[int] = set()
@@ -587,8 +576,11 @@ def plan(
         seen_tabs.add(index)
         session = tab.get("session_id")
         action = Action(
-            index, tab.get("title") or "", tab.get("kind") or "",
-            tab.get("restore") or "", session_id=session,
+            index,
+            tab.get("title") or "",
+            tab.get("kind") or "",
+            tab.get("restore") or "",
+            session_id=session,
         )
         existing = busy.get(index)
         if not action.command:
@@ -596,7 +588,7 @@ def plan(
         elif session and session in running:
             where = running[session]
             action.skip_reason = (
-                f"same session as {where[len(PLANNED):]}, started once"
+                f"same session as {where[len(PLANNED) :]}, started once"
                 if where.startswith(PLANNED)
                 else f"session already running in {where}"
             )
@@ -644,9 +636,7 @@ def execute(actions: list[Action], window_id: str, force: bool = False) -> int:
     busy_now: set[int] = set()
     if not force:
         busy_now = {
-            t["tab_index"]
-            for t in live_tabs()
-            if t["window_id"] == window_id and t["busy"]
+            t["tab_index"] for t in live_tabs() if t["window_id"] == window_id and t["busy"]
         }
     own = current_tty()
 
@@ -699,8 +689,7 @@ def restore_lock():
         handle = open(lock_path, "w")
     except OSError as exc:
         raise RestoreLockError(
-            f"Cannot take the restore lock {lock_path}: {exc.strerror or exc}. "
-            "Nothing was typed."
+            f"Cannot take the restore lock {lock_path}: {exc.strerror or exc}. Nothing was typed."
         ) from exc
     try:
         try:
@@ -746,8 +735,6 @@ def _tty_of(window_id: str, tab_index: int) -> str | None:
 
 def ensure_tabs(window_id: str, needed: int) -> None:
     """Add tabs to a live window until it has at least `needed` of them."""
-    have = len({
-        t["tab_index"] for t in iterm.enumerate_tabs() if t["window_id"] == window_id
-    })
+    have = len({t["tab_index"] for t in iterm.enumerate_tabs() if t["window_id"] == window_id})
     for _ in range(max(0, needed - have)):
         iterm.create_tab(window_id)

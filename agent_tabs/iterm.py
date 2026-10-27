@@ -45,7 +45,7 @@ def _escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
-ENUMERATE = f'''
+ENUMERATE = f"""
 tell application "iTerm2"
     set out to ""
     set wi to 0
@@ -63,7 +63,7 @@ tell application "iTerm2"
     end repeat
     return out
 end tell
-'''
+"""
 
 
 def is_running() -> bool:
@@ -148,7 +148,7 @@ def create_window(tab_count: int) -> str:
     if tab_count < 1:
         raise ValueError("tab_count must be at least 1")
     extra = tab_count - 1
-    script = f'''
+    script = f"""
 tell application "iTerm2"
     set win to (create window with default profile)
     repeat {extra} times
@@ -156,7 +156,7 @@ tell application "iTerm2"
     end repeat
     return (id of win)
 end tell
-'''
+"""
     window_id = _osascript(script).strip()
     if not window_id:
         raise ITermError("iTerm created a window but did not report its id")

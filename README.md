@@ -301,7 +301,7 @@ Lint and type checks, as CI runs them (the tools are pinned in
 
 ```bash
 pip install -r requirements-dev.txt
-ruff check . && mypy && shellcheck .githooks/pre-push
+ruff check . && ruff format --check . && mypy && shellcheck .githooks/pre-push
 ```
 
 No test framework and no dependencies. The tests drive real call sites where

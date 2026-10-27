@@ -77,9 +77,7 @@ def _stop_legacy_processes() -> list[str]:
                 break
             time.sleep(0.1)
         else:
-            stopped.append(
-                f"old recorder (pid {pid}) did not exit; it may still be capturing"
-            )
+            stopped.append(f"old recorder (pid {pid}) did not exit; it may still be capturing")
             continue
         stopped.append(f"stopped the old recorder still running as pid {pid}")
     return stopped
@@ -108,9 +106,10 @@ def main_checkout() -> Path:
     """
     try:
         result = subprocess.run(
-            ["git", "-C", str(REPO), "rev-parse", "--path-format=absolute",
-             "--git-common-dir"],
-            capture_output=True, text=True, check=False,
+            ["git", "-C", str(REPO), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except OSError:
         result = None
@@ -130,9 +129,7 @@ def main_checkout() -> Path:
 
 
 def _launchctl(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["launchctl", *args], capture_output=True, text=True, check=False
-    )
+    return subprocess.run(["launchctl", *args], capture_output=True, text=True, check=False)
 
 
 def _install_agent() -> tuple[list[str], bool]:
@@ -195,9 +192,7 @@ def _install_agent() -> tuple[list[str], bool]:
     if result.returncode == 0:
         lines.append(f"recorder loaded, every {INTERVAL_SECONDS}s")
         return lines, True
-    lines.append(
-        f"FAILED to load the recorder: {(result.stderr or result.stdout).strip()}"
-    )
+    lines.append(f"FAILED to load the recorder: {(result.stderr or result.stdout).strip()}")
     return lines, False
 
 

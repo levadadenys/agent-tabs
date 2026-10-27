@@ -25,6 +25,7 @@ def fresh(state: Path, settle: float = 0):
     """
     os.environ["AGENT_TABS_HOME"] = str(state)
     import agent_tabs.snapshot as m
+
     m = importlib.reload(m)
     m.COLLAPSE_SETTLE_SECONDS = settle
     return m
@@ -32,12 +33,22 @@ def fresh(state: Path, settle: float = 0):
 
 def snap(agents: int, label: str) -> dict:
     tabs = [
-        {"tab_index": i + 1, "pane_index": 1, "title": f"t{i}", "kind": "claude",
-         "session_id": f"id{i}", "cwd": "/repo", "restore": f"claude --resume id{i}"}
+        {
+            "tab_index": i + 1,
+            "pane_index": 1,
+            "title": f"t{i}",
+            "kind": "claude",
+            "session_id": f"id{i}",
+            "cwd": "/repo",
+            "restore": f"claude --resume id{i}",
+        }
         for i in range(agents)
     ]
-    return {"version": 1, "captured_at": label,
-            "windows": [{"window_index": 1, "window_id": "1", "tabs": tabs}]}
+    return {
+        "version": 1,
+        "captured_at": label,
+        "windows": [{"window_index": 1, "window_id": "1", "tabs": tabs}],
+    }
 
 
 def test_a_shutdown_collapse_does_not_overwrite():
@@ -96,7 +107,7 @@ def test_a_recovery_resets_the_streak():
     with tempfile.TemporaryDirectory() as tmp:
         m = fresh(Path(tmp))
         m.save(snap(22, "FULL"))
-        m.save(snap(3, "blip"))                       # streak 1
+        m.save(snap(3, "blip"))  # streak 1
         assert m.save(snap(22, "BACK"))[0] is not None, "recovery not promoted"
 
         latest = "unset"
@@ -123,9 +134,7 @@ def test_a_gap_restarts_the_streak():
             m.save(snap(3, f"shutdown{i}"))
         m.save(snap(0, "iterm-closed"))
         latest, _ = m.save(snap(3, "restoring"))
-        assert latest is None, (
-            "a partial capture after a gap was promoted over the full snapshot"
-        )
+        assert latest is None, "a partial capture after a gap was promoted over the full snapshot"
         assert m.load()["captured_at"] == "FULL"
 
 
@@ -188,8 +197,9 @@ def test_no_extra_mutable_state_is_kept():
         m = fresh(Path(tmp))
         m.save(snap(22, "FULL"))
         m.save(snap(3, "collapse"))
-        strays = [f.name for f in m.STATE_DIR.iterdir()
-                  if f.name not in {"snapshot.json", "history"}]
+        strays = [
+            f.name for f in m.STATE_DIR.iterdir() if f.name not in {"snapshot.json", "history"}
+        ]
         assert strays == [], f"unexpected mutable state: {strays}"
 
 
@@ -197,6 +207,7 @@ def test_a_collapse_spanning_the_settle_window_is_accepted():
     # Backdated archives stand in for captures 30s apart.
     from datetime import datetime, timedelta
     from datetime import timezone as tz
+
     with tempfile.TemporaryDirectory() as tmp:
         m = fresh(Path(tmp), settle=45)
         m.save(snap(22, "FULL"))
@@ -223,12 +234,15 @@ def test_concurrent_saves_do_not_corrupt_the_decision():
     # Two captures can overlap (a manual snapshot racing the 30s tick). With no
     # read-modify-write state there is nothing to lose an update on.
     import threading
+
     with tempfile.TemporaryDirectory() as tmp:
         m = fresh(Path(tmp), settle=45)
         m.save(snap(22, "FULL"))
         results = []
+
         def worker(n):
             results.append(m.save(snap(3, f"race{n}"))[0])
+
         threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
         for t in threads:
             t.start()

@@ -10,12 +10,27 @@ from agent_tabs import restore
 SNAP_WINDOW = {
     "window_index": 1,
     "tabs": [
-        {"tab_index": 1, "pane_index": 1, "title": "A", "kind": "claude",
-         "restore": "cd /repo && claude --resume aaa"},
-        {"tab_index": 2, "pane_index": 1, "title": "B", "kind": "claude",
-         "restore": "cd /repo && claude --resume bbb"},
-        {"tab_index": 3, "pane_index": 1, "title": "C", "kind": "codex",
-         "restore": "cd /repo && codex resume ccc"},
+        {
+            "tab_index": 1,
+            "pane_index": 1,
+            "title": "A",
+            "kind": "claude",
+            "restore": "cd /repo && claude --resume aaa",
+        },
+        {
+            "tab_index": 2,
+            "pane_index": 1,
+            "title": "B",
+            "kind": "claude",
+            "restore": "cd /repo && claude --resume bbb",
+        },
+        {
+            "tab_index": 3,
+            "pane_index": 1,
+            "title": "C",
+            "kind": "codex",
+            "restore": "cd /repo && codex resume ccc",
+        },
         {"tab_index": 4, "pane_index": 1, "title": "D", "kind": "shell", "restore": ""},
     ],
 }
@@ -23,14 +38,46 @@ SNAP_WINDOW = {
 
 def live(window=1):
     return [
-        {"window_index": window, "window_id": f"w{window}", "tab_index": 1, "pane_index": 1, "tty": "/dev/ttys001",
-         "title": "A", "kind": "claude", "busy": True},
-        {"window_index": window, "window_id": f"w{window}", "tab_index": 2, "pane_index": 1, "tty": "/dev/ttys002",
-         "title": "B", "kind": "zsh", "busy": False},
-        {"window_index": window, "window_id": f"w{window}", "tab_index": 3, "pane_index": 1, "tty": "/dev/ttys003",
-         "title": "C", "kind": "zsh", "busy": False},
-        {"window_index": window, "window_id": f"w{window}", "tab_index": 4, "pane_index": 1, "tty": "/dev/ttys004",
-         "title": "D", "kind": "zsh", "busy": False},
+        {
+            "window_index": window,
+            "window_id": f"w{window}",
+            "tab_index": 1,
+            "pane_index": 1,
+            "tty": "/dev/ttys001",
+            "title": "A",
+            "kind": "claude",
+            "busy": True,
+        },
+        {
+            "window_index": window,
+            "window_id": f"w{window}",
+            "tab_index": 2,
+            "pane_index": 1,
+            "tty": "/dev/ttys002",
+            "title": "B",
+            "kind": "zsh",
+            "busy": False,
+        },
+        {
+            "window_index": window,
+            "window_id": f"w{window}",
+            "tab_index": 3,
+            "pane_index": 1,
+            "tty": "/dev/ttys003",
+            "title": "C",
+            "kind": "zsh",
+            "busy": False,
+        },
+        {
+            "window_index": window,
+            "window_id": f"w{window}",
+            "tab_index": 4,
+            "pane_index": 1,
+            "tty": "/dev/ttys004",
+            "title": "D",
+            "kind": "zsh",
+            "busy": False,
+        },
     ]
 
 
@@ -73,6 +120,7 @@ def test_new_window_target_ignores_live_busy_state():
 
 if __name__ == "__main__":
     import traceback
+
     failures = 0
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

@@ -15,9 +15,7 @@ from pathlib import Path
 
 from . import config, procs
 
-UUID_RE = re.compile(
-    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-)
+UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 # Characters that make a shell do something other than run one command. A
 # recorded command line is replayed verbatim, so anything carrying these is not
@@ -122,7 +120,7 @@ def resolve_grok(proc: procs.Proc, cwd: str | None) -> dict:
     for path in procs.open_files(proc.pid):
         if not path.startswith(root):
             continue
-        rest = path[len(root):].strip("/").split("/")
+        rest = path[len(root) :].strip("/").split("/")
         if len(rest) >= 2:
             match = UUID_RE.fullmatch(rest[1])
             if match:
@@ -163,8 +161,7 @@ def resolve_command(proc: procs.Proc, cwd: str | None) -> dict:
 
 def resolve_shell(proc: procs.Proc, cwd: str | None) -> dict:
     """A tab sitting at a prompt: restore its directory, run nothing."""
-    return {"kind": "shell", "session_id": None, "cwd": cwd,
-            "restore": _cd(cwd), "warning": None}
+    return {"kind": "shell", "session_id": None, "cwd": cwd, "restore": _cd(cwd), "warning": None}
 
 
 AGENT_RESOLVERS = {
@@ -182,8 +179,7 @@ ALL_KINDS = (*tuple(AGENT_RESOLVERS), "ssh", "command", "shell", "empty")
 
 def resolve(proc: procs.Proc | None, cwd: str | None) -> dict:
     if proc is None:
-        return {"kind": "empty", "session_id": None, "cwd": cwd,
-                "restore": "", "warning": None}
+        return {"kind": "empty", "session_id": None, "cwd": cwd, "restore": "", "warning": None}
     resolver = AGENT_RESOLVERS.get(proc.argv0)
     if resolver:
         return resolver(proc, cwd)

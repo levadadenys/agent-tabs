@@ -288,9 +288,7 @@ def _last_good_count(exclude: Path | None = None) -> int | None:
 def _archive_time(path: Path) -> datetime | None:
     """Capture time from the archive filename, which save() always controls."""
     try:
-        return datetime.strptime(path.stem, "%Y%m%dT%H%M%S%f").replace(
-            tzinfo=timezone.utc
-        )
+        return datetime.strptime(path.stem, "%Y%m%dT%H%M%S%f").replace(tzinfo=timezone.utc)
     except ValueError:
         return None
 
