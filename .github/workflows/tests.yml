@@ -36,11 +36,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS minutes bill at ten times the Linux rate on a private
-        # repository and are free on a public one. While private, test only
-        # the bounds: 3.9 (macOS's /usr/bin/python3) and the newest. Public, the
-        # full range runs with no change here.
-        python: ${{ github.event.repository.private && fromJSON('["3.9", "3.14"]') || fromJSON('["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]') }}
+        # The bounds of the supported range. Standard library only, so the
+        # versions in between have not broken on their own; 3.9 has, often
+        # (it is macOS's /usr/bin/python3). Bump the newest as Python releases.
+        python: ["3.9", "3.14"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
