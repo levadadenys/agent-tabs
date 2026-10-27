@@ -16,29 +16,52 @@ from agent_tabs import restore
 
 
 def snap(*windows):
-    return {"windows": [
-        {"window_index": i + 1, "tabs": [
-            {"tab_index": j + 1, "pane_index": 1, "title": t, "kind": "claude",
-             "session_id": f"s{i}{j}", "restore": f"claude --resume s{i}{j}"}
-            for j, t in enumerate(titles)]}
-        for i, titles in enumerate(windows)]}
+    return {
+        "windows": [
+            {
+                "window_index": i + 1,
+                "tabs": [
+                    {
+                        "tab_index": j + 1,
+                        "pane_index": 1,
+                        "title": t,
+                        "kind": "claude",
+                        "session_id": f"s{i}{j}",
+                        "restore": f"claude --resume s{i}{j}",
+                    }
+                    for j, t in enumerate(titles)
+                ],
+            }
+            for i, titles in enumerate(windows)
+        ]
+    }
 
 
 def live(*windows):
     return [
-        {"window_index": wi, "window_id": f"w{wi}", "tab_index": ti, "pane_index": 1,
-         "tty": f"/dev/ttys{wi}{ti}", "title": t, "kind": None, "busy": False}
+        {
+            "window_index": wi,
+            "window_id": f"w{wi}",
+            "tab_index": ti,
+            "pane_index": 1,
+            "tty": f"/dev/ttys{wi}{ti}",
+            "title": t,
+            "kind": None,
+            "busy": False,
+        }
         for wi, titles in enumerate(windows, start=1)
-        for ti, t in enumerate(titles, start=1)]
+        for ti, t in enumerate(titles, start=1)
+    ]
 
 
 def decide(s, l, launcher, create_missing=False):
-    pairs, create, reported, notes, _ = restore.decide_restore_all(
-        s, l, launcher, create_missing
+    pairs, create, reported, notes, _ = restore.decide_restore_all(s, l, launcher, create_missing)
+    return (
+        sorted((w, m["window_index"]) for w, m in pairs),
+        [w["window_index"] for w in create],
+        [w["window_index"] for w in reported],
+        notes,
     )
-    return (sorted((w, m["window_index"]) for w, m in pairs),
-            [w["window_index"] for w in create],
-            [w["window_index"] for w in reported], notes)
 
 
 def test_the_launcher_window_is_never_paired():
@@ -50,8 +73,7 @@ def test_the_launcher_window_is_never_paired():
     # Not "no live window matched": one did, the launcher, and the note says so.
     assert reported == [], reported
     assert any(
-        "the one you are in) looks like snapshot window 1" in n and "Cmd-N" in n
-        for n in notes
+        "the one you are in) looks like snapshot window 1" in n and "Cmd-N" in n for n in notes
     ), notes
 
 
@@ -218,7 +240,9 @@ def test_would_create_matches_what_create_missing_actually_does():
     _, _, reported, _, would = restore.decide_restore_all(s, l, 1, False)
     _, create, _, _, would_again = restore.decide_restore_all(s, l, 1, True)
     assert would == [w["window_index"] for w in create] == would_again == [3, 4], (
-        would, [w["window_index"] for w in create])
+        would,
+        [w["window_index"] for w in create],
+    )
     # 1 and 2 are explained as "might be it", not listed as unmatched.
     assert sorted(w["window_index"] for w in reported) == [3, 4], reported
 
@@ -235,6 +259,7 @@ def test_a_refused_window_gets_commands_that_work():
 def test_every_canonical_shell_is_not_evidence():
     """Copilot round 3: the list was a copy missing tcsh, csh, ksh and dash."""
     from agent_tabs import procs
+
     for base in procs.SHELL_NAMES | procs.LOGIN_NAMES:
         for title in (base, f"-{base}"):
             s = snap(["web", title])
