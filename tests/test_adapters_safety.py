@@ -7,8 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import adapters, procs  # noqa: E402
-from runner import run  # noqa: E402
+from runner import run
+
+from agent_tabs import adapters, procs
 
 UUID = "f73c45c1-6f0b-41be-8641-563cddd433f0"
 
