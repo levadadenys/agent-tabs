@@ -51,7 +51,10 @@ def _stop_legacy_processes() -> list[str]:
 
     target = str(LEGACY_AUTOLAUNCH)
     stopped = []
-    for line in listing.splitlines():
+    # Newlines only, as in procs.process_table: ps passes U+2028 in argv
+    # through, so splitlines() would let any process forge a line naming
+    # another pid alongside the target path, and that pid would be signalled.
+    for line in listing.split("\n"):
         # Match the full path, not the basename: an unrelated process whose
         # command line merely mentions the script name must not be signalled.
         if target not in line:
