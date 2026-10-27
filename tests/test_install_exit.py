@@ -272,6 +272,9 @@ def test_the_interval_setting_reaches_the_plist_clamped():
         ('{"interval_seconds": null}', 30, True),
         ('{"interval_seconds": []}', 30, True),
     )
+    long_value = '{"interval_seconds": "' + "x" * 5000 + '"}'
+    _, lines = interval_written(long_value)
+    assert all(len(line) < 200 for line in lines), "a long value is echoed in full"
     for raw, expected, noted in cases:
         interval, lines = interval_written(raw)
         assert interval == expected, (raw, interval)
@@ -281,10 +284,40 @@ def test_the_interval_setting_reaches_the_plist_clamped():
 
 
 def test_a_missing_or_damaged_config_never_breaks_install():
-    for raw in (None, "{}", "\udcff\udcfe", "5", "null", "[1, 2]", "not json"):
+    # Missing: the default, silently. Present but unreadable: the default, and
+    # a note, or every setting in it would be dropped without a word.
+    for raw, noted in (
+        (None, False),
+        ("{}", False),
+        ("\udcff\udcfe", True),
+        ("\ufeff" + '{"interval_seconds": 60}', True),
+        ("5", True),
+        ("null", True),
+        ("[1, 2]", True),
+        ("not json", True),
+        ("[" * 100000, True),
+    ):
         interval, lines = interval_written(raw)
-        assert interval == 30, (raw, interval)
-        assert not [line for line in lines if "interval_seconds" in line], (raw, lines)
+        assert interval == 30, (raw[:20] if raw else raw, interval)
+        notes = [line for line in lines if "interval_seconds" in line]
+        assert len(notes) == int(noted), (raw[:20] if raw else raw, lines)
+
+
+def test_an_unreadable_state_directory_never_breaks_install():
+    # Python 3.9's Path.exists() raises PermissionError here; 3.14's does not.
+    with tempfile.TemporaryDirectory() as tmp:
+        locked = Path(tmp) / "locked"
+        locked.mkdir()
+        original = config.CONFIG_PATH
+        config.CONFIG_PATH = locked / "config.json"
+        locked.chmod(0)
+        try:
+            interval, note = config.interval_seconds()
+            assert interval == 30 and note and "could not be read" in note, note
+            assert config.codex_command("/x") == "codex"
+        finally:
+            locked.chmod(0o700)
+            config.CONFIG_PATH = original
 
 
 def test_a_recorder_left_alone_says_it_keeps_its_old_interval():
