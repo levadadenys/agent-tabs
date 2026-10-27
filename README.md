@@ -1,14 +1,100 @@
 # agent-tabs
 
-Get every terminal window full of agent sessions back after a crash or reboot.
+[![CI](https://github.com/levadadenys/agent-tabs/actions/workflows/ci.yml/badge.svg)](https://github.com/levadadenys/agent-tabs/actions/workflows/ci.yml)
+[![Tests](https://github.com/levadadenys/agent-tabs/actions/workflows/tests.yml/badge.svg)](https://github.com/levadadenys/agent-tabs/actions/workflows/tests.yml)
+![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue)
+![macOS + iTerm2](https://img.shields.io/badge/macOS-iTerm2-lightgrey)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+**Get every terminal window full of AI coding agents back after a crash or
+reboot.** agent-tabs records which Claude Code, Codex or Grok session runs in
+which iTerm2 window and tab, and in which directory. After a crash it rebuilds
+those windows and resumes each session where it was.
+
+It does not save or read your conversations; the agents keep those on disk
+themselves. For each tab it records the directory, the tab title, the command
+running there and the agent's session id, in `~/.agent-tabs`, readable only by
+you. It makes no network connections, needs nothing beyond the Python that
+ships with macOS, and types nothing until you pass `--go`. macOS and iTerm2
+only.
+
+**Quick start:** [install](#install) it once. After a crash or reboot, open a
+new iTerm window and run `agent-tabs restore --all --create-missing` to see the
+plan, then again with `--go` to carry it out.
+
+<!-- Demo: record a reboot restore (`agent-tabs restore --all --create-missing`,
+     dry run then --go) and save it as docs/demo.gif, then replace this comment:
+<p align="center"><img src="docs/demo.gif" width="720" alt="A dry run listing every window's sessions, then --go reopening them"></p>
+-->
+
+## Why
 
 Claude, Codex and Grok keep their transcripts on disk, so a crash never loses a
 conversation. What it loses is the **grouping**: which session was in which
-iTerm window and tab, and in what working directory. Nothing records that, so
-recovery normally means guessing from file timestamps.
+iTerm window and tab, and in what working directory. With a dozen sessions
+across several windows, nothing records that, so recovery means guessing from
+file timestamps and resuming sessions one by one.
 
 `agent-tabs` records the grouping every 30 seconds (configurable) while you work,
 and replays it afterwards.
+
+## What you need
+
+- **macOS and iTerm2.** Developed and tested on macOS 26 with iTerm2 3.6.
+- **Python 3.9 or later.** The `python3` that comes with macOS (Xcode Command
+  Line Tools) is enough; there are no dependencies to install.
+- **At least one agent CLI**: [Claude Code](https://claude.com/claude-code),
+  Codex or Grok. Other tabs are restored too: an `ssh` session or a dev server is
+  replayed, a plain shell gets its directory back.
+
+macOS may ask whether the recorder may control iTerm (System Settings →
+Privacy & Security → Automation). Allow it: that is how the window and tab
+layout is read.
+
+## Install
+
+```bash
+git clone https://github.com/levadadenys/agent-tabs.git
+cd agent-tabs && ./bin/agent-tabs install
+```
+
+That:
+
+- installs the recorder as a **launchd agent**, capturing every 30 seconds by
+  default (see [Config](#config));
+- links `agent-tabs` into `~/.local/bin`;
+- links a `resume-tabs` skill into `~/.claude/skills`, so you can ask Claude to
+  restore your tabs.
+
+No iTerm restart is needed, and recording continues across iTerm restarts.
+Check it with `agent-tabs list`: the snapshot should be seconds old.
+
+If your shell says `agent-tabs: command not found`, `~/.local/bin` is not on
+your `PATH` (it is not, on a fresh macOS). Add it, then open a new tab:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
+`install` exits non-zero if the recorder fails to load, so a script can rely on
+its exit code.
+
+### Stop or uninstall
+
+```bash
+launchctl list | grep agent-tabs                    # is the recorder registered?
+launchctl bootout gui/$UID/com.agent-tabs.recorder   # stop it until next login
+```
+
+`bootout` only lasts until the next login: the job is loaded again from
+`~/Library/LaunchAgents`. To remove it for good:
+
+```bash
+launchctl bootout gui/$UID/com.agent-tabs.recorder
+rm ~/Library/LaunchAgents/com.agent-tabs.recorder.plist
+rm ~/.local/bin/agent-tabs ~/.claude/skills/resume-tabs
+rm -rf ~/.agent-tabs                                  # snapshots and history
+```
 
 ## After a crash or reboot
 
@@ -51,47 +137,6 @@ than rebuilt — restore it explicitly once you have checked.
 **Restore before starting new sessions.** Everything is a dry run until you add
 `--go`, and a session that is already running anywhere is never started twice,
 so it is safe to run the dry run first and read it.
-
-## Install
-
-```bash
-git clone https://github.com/<you>/agent-tabs.git
-cd agent-tabs && ./bin/agent-tabs install
-```
-
-That:
-
-- installs the recorder as a **launchd agent**, capturing every 30 seconds by
-  default (see [Config](#config));
-- links `agent-tabs` into `~/.local/bin`;
-- links a `resume-tabs` skill into `~/.claude/skills`, so you can ask Claude to
-  restore your tabs.
-
-No iTerm restart is needed, and recording continues across iTerm restarts.
-Check it with `agent-tabs list`: the snapshot should be seconds old.
-
-`install` exits non-zero if the recorder fails to load, so a script can rely on
-its exit code. An earlier version ran the recorder from iTerm2's
-`Scripts/AutoLaunch/` folder; that needed iTerm's Python runtime, which is not
-installed by default, so it could fail silently. `install` removes that old
-entry when it finds one.
-
-### Stop or uninstall
-
-```bash
-launchctl list | grep agent-tabs                    # is the recorder registered?
-launchctl bootout gui/$UID/com.agent-tabs.recorder   # stop it until next login
-```
-
-`bootout` only lasts until the next login: the job is loaded again from
-`~/Library/LaunchAgents`. To remove it for good:
-
-```bash
-launchctl bootout gui/$UID/com.agent-tabs.recorder
-rm ~/Library/LaunchAgents/com.agent-tabs.recorder.plist
-rm ~/.local/bin/agent-tabs ~/.claude/skills/resume-tabs
-rm -rf ~/.agent-tabs                                  # snapshots and history
-```
 
 ## Commands
 
@@ -162,67 +207,46 @@ Restore types into live shells, so it is conservative by default:
 
 ### How `--all` pairs windows
 
-A wrong pairing types one window's sessions into another, so:
-
-- windows are matched by how many tab titles they share, as a one-to-one
-  assignment that maximises total overlap — a snapshot window goes to at most
-  one live window. A title that is only a shell name (`-zsh`, `bash`, …) does
-  not count: every idle tab looks like that;
-- the window `--all` runs in is never filled, since one of its tabs is the one
-  being typed in. Run it from a new window. Run from inside a restored window
-  instead, it is reported, and running again from a new window restores it —
-  anything already running is skipped. Meanwhile it neither hands its snapshot
-  window to another window nor settles another window's tie: a pairing is kept
-  only if it is the same with and without that window, and any other is
-  reported;
-- a pairing is used only when it is **forced**: the same in every best
-  assignment. If the evidence fits two pairings equally well, those windows are
-  reported, never guessed;
-- a group of windows tangled by shared titles — more than 12 live windows, or
-  more than 12 snapshot windows they could be — is reported rather than
-  matched;
-- windows are targeted by iTerm's stable window id, not their position, which
-  changes whenever you focus a window.
-
-Anything not paired is listed with the command that restores it. A snapshot
-window that an unpaired live window might be is listed as such, with the
-command for either case, rather than as unmatched.
+A wrong pairing would type one window's sessions into another, so each live
+window is paired with the snapshot window whose tab titles it shares most, one
+to one, and only when the evidence leaves no other choice. Ties are reported,
+never guessed; a title that is only a shell name (`-zsh`) does not count; the
+window you run it from is never paired. Anything not paired is listed with the
+command that restores it. The full rules are in
+[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md#pairing-live-windows-with-snapshot-windows-restore---all).
 
 ## Snapshots and reboots
+
+A **snapshot** is the record of every window, tab and session at one moment.
+The recorder takes one per capture; the newest one worth trusting is kept as
+`snapshot.json`, and that is what `list` and `restore` use.
 
 - `~/.agent-tabs/snapshot.json` — the snapshot `list` and `restore` use
 - `~/.agent-tabs/history/` — every capture from the last half hour, never fewer
   than the newest 60 (so a long sleep does not empty it), at most 180
-- `~/.agent-tabs/pre-boot.json` — the last snapshot from before the most recent reboot
+- `~/.agent-tabs/pre-boot.json` — the fullest snapshot from before the most
+  recent reboot
 - `~/.agent-tabs/recorder.log` — recorder errors
 
-A capture is not always promoted to `snapshot.json`, because the moment a
-snapshot matters most is a shutdown, when tabs die one at a time:
+A capture does not always replace `snapshot.json`, because the moment it
+matters most is a shutdown, when tabs close one by one. A capture with no agent
+sessions never does. One that lost a third or more of the sessions waits until
+the drop has lasted three captures and 45 seconds (about a minute at the
+default interval); a shutdown is over long before that. Closing a tab or two is
+taken at once.
 
-- a capture with **no** agent sessions is never promoted;
-- a capture that **collapsed** — kept less than 67% of the last good one's
-  sessions — is held back until the drop has lasted three captures in a row and
-  at least 45 seconds: about a minute at the default interval, 50 seconds at
-  10 s, 10 minutes at 300 s. A shutdown is over long before that. Genuinely
-  closing most of your sessions is accepted after that; closing a tab or two is
-  promoted immediately.
-
-**Across a reboot**, the first promotion after boot pins the pre-reboot fleet
-in `pre-boot.json`: the fuller of the outgoing `snapshot.json` and the fullest
-capture from before the reboot still in history. Not simply the newest: the
-last captures before a reboot are half-dead ones from the shutdown, and one
-can reach `snapshot.json` if the shutdown drags on. Not history alone either:
-after a long idle spell it may no longer hold the fleet. That matters if iTerm restored nothing and you started a
-session before restoring: that small capture replaces `snapshot.json` about a
-minute later, and history rotates the full one out after about half an hour. When
-that has happened, `list` and `restore` say so and print the command to restore
-the pre-reboot fleet instead:
+After a reboot, the first snapshot taken also saves the pre-reboot sessions in
+`pre-boot.json`. If a small post-reboot capture has replaced `snapshot.json`
+before you restored, `list` and `restore` say so and print the command to use
+instead:
 
 ```bash
 agent-tabs restore --all --create-missing -f ~/.agent-tabs/pre-boot.json
 ```
 
-Any capture in `history/` can be restored the same way with `-f`.
+Any capture in `history/` can be restored the same way with `-f`. The rules,
+and why each exists, are in
+[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md#which-capture-becomes-the-snapshot).
 
 ## Troubleshooting
 
@@ -299,26 +323,75 @@ never fewer than 60 captures, so at a long interval it reaches further back (at
   recorded command has no session to check, so restoring the same snapshot
   twice into new windows — two `--create-missing` runs whose first windows no
   longer match — runs it twice. Read the dry run.
+- A capture that lost most of its sessions is held back by comparing it with
+  the last good snapshot. If `snapshot.json` is unreadable and history holds no
+  capture with sessions, there is nothing to compare with, and a small capture
+  can replace it; `pre-boot.json` still holds the pre-reboot sessions.
 - Tab positions are read when planning. Reordering tabs *within* a window
   between the dry run and `--go` could put a command in the wrong tab of the
   right window.
 
-**What has been exercised for real:** a genuine crash has been restored from,
-window by window. `--all`, `--create-missing` and the pre-reboot copy are covered
-by tests and by dry runs against a live fleet, but not yet through a real
-reboot. Run the dry run first and read it.
+## What has been exercised for real
 
-## Tests
+- A genuine crash has been restored from, window by window.
+- `restore --all`, `--create-missing` and the pre-reboot copy are covered by
+  the test suite and by dry runs against 30+ live sessions (macOS
+  26.3, iTerm2 3.6.9), but **not yet through a real reboot**.
+- The recorder has run unattended under launchd since September 2026.
+
+Until the reboot path has been exercised for real, run the dry run first and
+read it. That is good advice regardless.
+
+## FAQ
+
+**Does it read my conversations?** No. For Claude it reads the small pointer
+file Claude writes for each running process (`~/.claude/sessions/<pid>.json`:
+the session id and directory). For Codex and Grok it looks only at the *paths*
+of files the process has open, which contain the session id. No transcript is
+opened.
+
+**Does it send anything anywhere?** No. It makes no network connections. The
+snapshots stay in `~/.agent-tabs`, readable only by you.
+
+**Will it start a session twice?** No. A session that is already running in any
+iTerm tab is skipped, checked when planning and again just before typing, and
+`--force` does not change that. See [Safety](#safety).
+
+**What does it cost while I work?** One capture takes about 2 seconds with two
+dozen sessions, mostly AppleScript, `ps` and `lsof`: roughly 6% of one core at
+the default 30-second interval, in bursts. Raise `interval_seconds` to spend
+less.
+
+**Why only iTerm2?** Recording needs a terminal that can list its windows and
+tabs with their ttys and type into a given tab, from a plain shell and from
+launchd. iTerm2's AppleScript does that without its optional Python runtime.
+Other terminals are on the [roadmap](#roadmap).
+
+**Does it handle split panes?** Every pane is recorded, but only the first pane
+of each tab is recreated.
+
+**I uninstalled it. Is anything left behind?** See [Stop or
+uninstall](#stop-or-uninstall): the launchd job, two symlinks and
+`~/.agent-tabs`.
+
+## Roadmap
+
+- **More terminals:** Terminal.app, Ghostty, WezTerm, kitty, and tmux, which
+  would also bring Linux.
+- **Split panes** recreated, not only recorded.
+- **A real reboot** restored from, and the result recorded above.
+
+## Development
 
 ```bash
 python3 tests/run_all.py
 ```
 
-Lint and type checks, as CI runs them (the tools are pinned in
-`requirements-dev.txt`; agent-tabs itself needs none of them):
+Lint and type checks run as in CI; [CONTRIBUTING.md](CONTRIBUTING.md#getting-started)
+has the setup (a virtualenv on Python 3.10+, since the pinned mypy no longer
+supports 3.9; agent-tabs itself needs none of these tools):
 
 ```bash
-pip install -r requirements-dev.txt
 ruff check . && ruff format --check . && mypy && shellcheck .githooks/pre-push
 ```
 
@@ -330,8 +403,13 @@ checked against an independent brute-force oracle on hundreds of random
 instances. Each test was mutation-checked: reverting the fix it covers makes it
 fail.
 
-Each module runs with a private, empty bytecode cache (`PYTHONPYCACHEPREFIX`).
-When mutating by hand, an edit of the same byte length restored with a matching
-mtime passes Python's mtime+size check, and the tests silently keep running the
-stale mutant. `-B` does **not** prevent this — it only stops *writing* `.pyc`
-files. Outside this runner, set `PYTHONPYCACHEPREFIX=$(mktemp -d)`.
+## Contributing
+
+Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md)
+for setup, the testing rules and the safety rules a change must not break.
+Report security problems privately, as described in [SECURITY.md](SECURITY.md).
+Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE)
