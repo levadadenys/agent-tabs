@@ -99,5 +99,46 @@ def test_a_line_separator_in_argv_cannot_forge_a_process():
         holder.kill()
 
 
+def test_a_line_separator_in_a_path_cannot_forge_lsof_records():
+    # lsof -F escapes a newline in a path but passes U+2028 through. A
+    # directory named "x<U+2028>p<pid><U+2028>n/evil" would otherwise tell
+    # cwd_of that another process works in /evil, and restore would cd there.
+    # Real lsof, real processes.
+    import subprocess
+    import tempfile
+    import time
+
+    decoy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    with tempfile.TemporaryDirectory() as tmp:
+        odd = Path(tmp) / f"x\u2028p{decoy.pid}\u2028n/evil"
+        odd.parent.mkdir(parents=True, exist_ok=True)
+        odd.mkdir()
+        holder = subprocess.Popen(
+            [sys.executable, "-c", "import time; f = open('held'); time.sleep(30)"],
+            cwd=str(odd),
+        )
+        (odd / "held").write_text("")
+        try:
+            for _ in range(50):
+                cwds = procs.cwd_of([holder.pid, decoy.pid])
+                if holder.pid in cwds:
+                    break
+                time.sleep(0.1)
+            else:
+                raise AssertionError("setup: lsof never reported the holder's cwd")
+            assert "\u2028" in cwds[holder.pid], "setup: this lsof escapes U+2028"
+            assert cwds.get(decoy.pid) != "/evil", f"a forged cwd was parsed: {cwds}"
+            assert cwds[holder.pid].endswith("n/evil"), "the path was cut at the separator"
+            for _ in range(50):
+                held = [f for f in procs.open_files(holder.pid) if f.endswith("held")]
+                if held:
+                    break
+                time.sleep(0.1)
+            assert held and "\u2028" in held[0], f"open_files split the path: {held}"
+        finally:
+            holder.kill()
+            decoy.kill()
+
+
 if __name__ == "__main__":
     raise SystemExit(run(globals()))
