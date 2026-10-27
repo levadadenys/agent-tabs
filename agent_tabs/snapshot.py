@@ -344,7 +344,7 @@ def _history_by_time() -> list[Path]:
     return sorted(HISTORY_DIR.glob("*.json"), key=lambda p: (_archive_time(p) or oldest, p.name))
 
 
-def _prune_history() -> None:
+def _prune_history(keep_new: Path) -> None:
     files = _history_by_time()
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=HISTORY_WINDOW_SECONDS)
     keep = set(files[-HISTORY_MIN:])
@@ -355,6 +355,9 @@ def _prune_history() -> None:
         if when is not None and when >= cutoff:
             keep.add(path)
     kept = [p for p in files if p in keep][-HISTORY_CAP:]
+    # The capture just written always stays, even when a backwards clock jump
+    # has filled the cap with archives dated later than it.
+    kept.append(keep_new)
     for stale in set(files) - set(kept):
         stale.unlink(missing_ok=True)
 
@@ -380,7 +383,7 @@ def save(snap: dict) -> tuple[Path | None, Path]:
     # sessions returns before snapshot.json would harden it.
     _harden(STATE_DIR)
     _write_atomic(archive, snap)
-    _prune_history()
+    _prune_history(archive)
 
     count = agent_tab_count(snap)
     if count == 0:
