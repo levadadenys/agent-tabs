@@ -69,15 +69,38 @@ def oracle(snapshot_windows, live_windows):
 
 
 def fixtures(snapshot_windows, live_windows):
-    snap = {"windows": [
-        {"window_index": i + 1, "tabs": [
-            {"tab_index": j + 1, "pane_index": 1, "title": t, "kind": "claude",
-             "restore": "x"} for j, t in enumerate(ts)]}
-        for i, ts in enumerate(snapshot_windows)]}
+    snap = {
+        "windows": [
+            {
+                "window_index": i + 1,
+                "tabs": [
+                    {
+                        "tab_index": j + 1,
+                        "pane_index": 1,
+                        "title": t,
+                        "kind": "claude",
+                        "restore": "x",
+                    }
+                    for j, t in enumerate(ts)
+                ],
+            }
+            for i, ts in enumerate(snapshot_windows)
+        ]
+    }
     live = [
-        {"window_index": wi, "window_id": f"w{wi}", "tab_index": ti, "pane_index": 1,
-         "tty": f"/dev/t{wi}{ti}", "title": t, "kind": None, "busy": False}
-        for wi, ts in enumerate(live_windows, 1) for ti, t in enumerate(ts, 1)]
+        {
+            "window_index": wi,
+            "window_id": f"w{wi}",
+            "tab_index": ti,
+            "pane_index": 1,
+            "tty": f"/dev/t{wi}{ti}",
+            "title": t,
+            "kind": None,
+            "busy": False,
+        }
+        for wi, ts in enumerate(live_windows, 1)
+        for ti, t in enumerate(ts, 1)
+    ]
     return snap, live
 
 
@@ -92,6 +115,7 @@ def random_instance(rnd):
             if roll < 0.25:
                 return rnd.choice(sorted(SHELL_NAMES))  # shell names: not evidence
             return rnd.choice(alphabet)
+
         return [title() for _ in range(rnd.randint(1, 4))]
 
     snapshot_windows = [window() for _ in range(rnd.randint(1, 5))]
