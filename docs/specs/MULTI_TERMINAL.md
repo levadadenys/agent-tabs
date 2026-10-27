@@ -50,29 +50,32 @@ at first and no behaviour change. This is the prerequisite for everything below.
 
 ```python
 class Pane(TypedDict):
-    window_key: str      # stable for the window's life; never a position
-    window_number: int   # 1-based display order: the N in `restore N`, and
-                         # today's pairing key (window_index); see below
+    window_key: str  # stable for the window's life; never a position
+    window_number: int  # 1-based display order: the N in `restore N`, and
+    # today's pairing key (window_index); see below
     tab_key: str | None  # stable id of the tab, where the backend has one
-    tab_number: int      # 1-based position within the window, no gaps
+    tab_number: int  # 1-based position within the window, no gaps
     pane_number: int
-    tty: str | None      # at least one of tty / pid is required
-    pid: int | None      # the pane's shell, when the backend knows it
-    cwd: str | None      # a plain path; backends that report URLs convert
-    title: str           # program-controlled: cleaned by the backend
-    busy_hint: bool      # the backend knows the pane cannot take typing
-                         # (tmux copy-mode, a dead pane); joined with the
-                         # process-based busy check, never replacing it
+    tty: str | None  # at least one of tty / pid is required
+    pid: int | None  # the pane's shell, when the backend knows it
+    cwd: str | None  # a plain path; backends that report URLs convert
+    title: str  # program-controlled: cleaned by the backend
+    busy_hint: bool  # the backend knows the pane cannot take typing
+    # (tmux copy-mode, a dead pane); joined with the
+    # process-based busy check, never replacing it
+
 
 class Backend(Protocol):
-    name: str                                    # recorded in the snapshot
-    def is_running(self) -> bool: ...            # "not running" is a state, not an error
-    def list_panes(self) -> list[Pane]: ...      # raises on a listing it cannot trust
+    name: str  # recorded in the snapshot
+
+    def is_running(self) -> bool: ...  # "not running" is a state, not an error
+    def list_panes(self) -> list[Pane]: ...  # raises on a listing it cannot trust
     def own_pane(self, panes: list[Pane]) -> Pane | None: ...
-    def create_window(self, tabs: int, cwd: str | None) -> str: ...   # returns a window_key
+    def create_window(self, tabs: int, cwd: str | None) -> str: ...  # returns a window_key
     def create_tab(self, window_key: str, cwd: str | None) -> None: ...
-    def type_into(self, window_key: str, tab_number: int, tab_key: str | None,
-                  text: str) -> None: ...
+    def type_into(
+        self, window_key: str, tab_number: int, tab_key: str | None, text: str
+    ) -> None: ...
 ```
 
 ### What the safety rules need from a backend
