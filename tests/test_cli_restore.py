@@ -153,10 +153,25 @@ def test_a_session_in_a_paired_and_a_new_window_starts_once():
         assert rec.started().count("dup") == 1, f"started twice: {rec.calls}"
 
 
+def test_go_force_without_a_terminal_types_nothing():
+    # Without a terminal restore cannot find the tab it runs from; only that
+    # tab being busy keeps restore out of it, and --force lifts exactly that.
+    with tempfile.TemporaryDirectory() as tmp:
+        rec = setup(Path(tmp), snap([("web", "s1")]), live(["web"]))
+        assert cli.cmd_restore(args(force=True)) == 2
+        assert rec.calls == [], f"typed with --force and no terminal: {rec.calls}"
+        # Not --force, and not --go: both are still allowed without a terminal.
+        assert cli.cmd_restore(args(go=False, force=True)) == 0
+        assert cli.cmd_restore(args()) == 0
+        assert rec.started() == ["s1"], "setup: without --force, the restore runs"
+
+
 def test_force_is_passed_through_as_given():
     for force in (False, True):
         with tempfile.TemporaryDirectory() as tmp:
             rec = setup(Path(tmp), snap([("web", "s1")]), live(["web"]))
+            # From a terminal: without one, --go --force is refused outright.
+            restore.current_tty = lambda: "ttys099"  # type: ignore[assignment]
             assert cli.cmd_restore(args(force=force)) == 0
             assert [f for _, f, _ in rec.calls] == [force], rec.calls
 
