@@ -27,20 +27,31 @@ BOOT = datetime(2026, 9, 26, 13, 33, tzinfo=timezone.utc)
 def fresh(state: Path, boot=BOOT, settle: float = 0):
     os.environ["AGENT_TABS_HOME"] = str(state)
     import agent_tabs.snapshot as m
+
     m = importlib.reload(m)
-    m.boot_time = (lambda: boot)  # type: ignore[assignment]
+    m.boot_time = lambda: boot  # type: ignore[assignment]
     m.COLLAPSE_SETTLE_SECONDS = settle
     return m
 
 
 def snap(sessions: int, at: datetime) -> dict:
     tabs = [
-        {"tab_index": i + 1, "pane_index": 1, "title": f"t{i}", "kind": "claude",
-         "session_id": f"id{i}", "cwd": "/repo", "restore": f"claude --resume id{i}"}
+        {
+            "tab_index": i + 1,
+            "pane_index": 1,
+            "title": f"t{i}",
+            "kind": "claude",
+            "session_id": f"id{i}",
+            "cwd": "/repo",
+            "restore": f"claude --resume id{i}",
+        }
         for i in range(sessions)
     ]
-    return {"version": 1, "captured_at": at.isoformat(timespec="seconds"),
-            "windows": [{"window_index": 1, "window_id": "1", "tabs": tabs}]}
+    return {
+        "version": 1,
+        "captured_at": at.isoformat(timespec="seconds"),
+        "windows": [{"window_index": 1, "window_id": "1", "tabs": tabs}],
+    }
 
 
 def before(minutes):
@@ -130,8 +141,8 @@ def test_a_pin_from_an_earlier_reboot_is_never_offered():
         m.save(snap(20, old_boot + timedelta(minutes=1)))
         assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20, "setup: an old pin exists"
 
-        m.boot_time = (lambda: BOOT)          # the machine reboots again
-        m.LATEST.write_text("{unreadable")    # so this boot's pin cannot happen...
+        m.boot_time = lambda: BOOT  # the machine reboots again
+        m.LATEST.write_text("{unreadable")  # so this boot's pin cannot happen...
         for archive in m.HISTORY_DIR.glob("*.json"):  # ...not even from history
             archive.unlink()
         latest, _ = m.save(snap(20, after(1)))
@@ -140,7 +151,7 @@ def test_a_pin_from_an_earlier_reboot_is_never_offered():
             "setup: the pin for this boot should have failed"
         )
 
-        m.save(snap(5, after(2)))             # sessions drop, as after a reboot
+        m.save(snap(5, after(2)))  # sessions drop, as after a reboot
         for minute in range(3, 3 + m.COLLAPSE_STREAK):
             m.save(snap(5, after(minute)))
         assert m.agent_tab_count(m.load()) == 5, "setup: the drop is accepted"
@@ -170,8 +181,8 @@ def test_the_fallback_pins_the_full_fleet_not_the_dying_shutdown():
     with tempfile.TemporaryDirectory() as tmp:
         m = fresh(Path(tmp))
         m.save(snap(20, before(10)))
-        m.save(snap(8, before(2)))          # shutdown in progress
-        m.save(snap(3, before(1)))          # nearly gone
+        m.save(snap(8, before(2)))  # shutdown in progress
+        m.save(snap(3, before(1)))  # nearly gone
         m.LATEST.write_text("{unreadable")
         m.save(snap(20, after(1)))
         assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20, "pinned a dying capture"
@@ -184,15 +195,17 @@ def test_a_missed_pin_is_made_on_a_later_promotion():
         m = fresh(Path(tmp))
         m.save(snap(20, before(5)))
         real = m._write_atomic
+
         def flaky(path, data):
             if path == m.PRE_BOOT:
                 raise OSError("disk full")
             return real(path, data)
+
         m._write_atomic = flaky
-        m.save(snap(20, after(1)))          # the pin fails
+        m.save(snap(20, after(1)))  # the pin fails
         m._write_atomic = real
         assert not m.PRE_BOOT.exists()
-        m.save(snap(21, after(2)))          # snapshot.json is post-boot now
+        m.save(snap(21, after(2)))  # snapshot.json is post-boot now
         assert m.PRE_BOOT.exists(), "a missed pin was never retried"
         assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20
 
@@ -203,7 +216,7 @@ def test_the_fullest_archive_wins_wherever_it_sits_in_history():
         m = fresh(Path(tmp))
         m.save(snap(5, before(30)))
         m.save(snap(22, before(20)))
-        m.save(snap(3, before(1)))          # dying; held back, archived
+        m.save(snap(3, before(1)))  # dying; held back, archived
         m.LATEST.write_text("{unreadable")
         m.save(snap(5, after(1)))
         assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 22, "missed the full fleet"
@@ -233,7 +246,7 @@ def test_with_history_rotated_out_the_snapshot_itself_is_pinned():
         m.save(snap(20, before(60)))
         for archive in m.HISTORY_DIR.glob("*.json"):
             archive.unlink()
-        m.save(snap(20, after(1)))        # windows restored by iTerm; promoted
+        m.save(snap(20, after(1)))  # windows restored by iTerm; promoted
         assert m.PRE_BOOT.exists(), "the fleet in snapshot.json was not pinned"
         assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20
 
@@ -277,10 +290,12 @@ def test_boot_time_reads_kern_boottime_as_utc():
     with tempfile.TemporaryDirectory() as tmp:
         os.environ["AGENT_TABS_HOME"] = tmp
         import agent_tabs.snapshot as m
+
         m = importlib.reload(m)
 
         class Done:
             stdout = "{ sec = 1790429604, usec = 512000 } Sat Sep 26 16:33:24 2026\n"
+
         m.subprocess.run = lambda *a, **k: Done()  # type: ignore[assignment]
         try:
             assert m.boot_time() == datetime(2026, 9, 26, 13, 33, 24, tzinfo=timezone.utc), (
@@ -292,6 +307,7 @@ def test_boot_time_reads_kern_boottime_as_utc():
 
 def test_a_naive_capture_time_is_read_as_utc():
     import agent_tabs.snapshot as m
+
     when = m.captured_at({"captured_at": "2026-09-26T13:33:00"})
     assert when == datetime(2026, 9, 26, 13, 33, tzinfo=timezone.utc), when
 
@@ -306,7 +322,7 @@ def test_damaged_files_never_crash_list_restore_or_a_capture():
             m.LATEST.write_bytes(content)
             (m.HISTORY_DIR / "20260101T000000000000.json").write_bytes(content)
             m.PRE_BOOT.write_bytes(content)
-            m.save(snap(20, after(1)))       # the pin reads all three
+            m.save(snap(20, after(1)))  # the pin reads all three
             assert m.agent_tab_count(m.load(m.PRE_BOOT)) == 20, content
             m.PRE_BOOT.write_bytes(content)
             assert m.pre_boot_warning(snap(1, after(3))) is None, content
