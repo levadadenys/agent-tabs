@@ -5,7 +5,7 @@ description: Restore iTerm tabs full of agent sessions (Claude, Codex, Grok, ssh
 
 # Resume terminal tabs after a crash or reboot
 
-`agent-tabs` records the iTerm window/tab map every 30 seconds and replays it
+`agent-tabs` records the iTerm window/tab map every 30 seconds (by default) and replays it
 afterwards. Session transcripts are never lost in a crash; what is lost is the
 *grouping* — which session was in which window and tab, in which directory — and
 that is what the snapshot preserves.
