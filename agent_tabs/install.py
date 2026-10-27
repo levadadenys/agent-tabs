@@ -10,6 +10,8 @@ import sys
 import time
 from pathlib import Path
 
+from . import config
+
 REPO = Path(__file__).resolve().parent.parent
 BIN_DIR = Path.home() / ".local" / "bin"
 SKILL_SRC = REPO / "skills" / "resume-tabs"
@@ -19,7 +21,6 @@ LABEL = "com.agent-tabs.recorder"
 AGENT_DIR = Path.home() / "Library" / "LaunchAgents"
 AGENT_PLIST = AGENT_DIR / f"{LABEL}.plist"
 LOG = Path.home() / ".agent-tabs" / "recorder.log"
-INTERVAL_SECONDS = 30
 
 # Left behind by versions that ran the recorder from iTerm's AutoLaunch folder.
 # That needed iTerm's Python runtime, which is not installed by default, so it
@@ -39,7 +40,7 @@ def _stop_legacy_processes() -> list[str]:
     """Kill an AutoLaunch recorder iTerm already started.
 
     Unlinking the script does not stop a running instance -- its loop lives
-    until iTerm exits. Left alone it would keep capturing every 30s alongside
+    until iTerm exits. Left alone it would keep capturing on its own timer alongside
     the launchd job, and the two would race on snapshot.json.
     """
     try:
@@ -138,6 +139,9 @@ def _launchctl(*args: str) -> subprocess.CompletedProcess:
 def _install_agent() -> tuple[list[str], bool]:
     """Returns its output lines and whether the recorder is actually loaded."""
     lines: list[str] = []
+    interval, note = config.interval_seconds()
+    if note:
+        lines.append(note)
     cli = main_checkout() / "bin" / "agent-tabs"
     LOG.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
@@ -151,7 +155,7 @@ def _install_agent() -> tuple[list[str], bool]:
     job = {
         "Label": LABEL,
         "ProgramArguments": [sys.executable, str(cli), "snapshot", "--quiet"],
-        "StartInterval": INTERVAL_SECONDS,
+        "StartInterval": interval,
         "RunAtLoad": True,
         # A capture taken while iTerm is closed finds nothing and is not
         # promoted, so routine failures here are expected and must not spam.
@@ -176,7 +180,8 @@ def _install_agent() -> tuple[list[str], bool]:
         if previous is None and _launchctl("print", f"{domain}/{LABEL}").returncode == 0:
             lines.append(
                 "a recorder is already loaded and no previous definition was "
-                "saved, so it was left alone rather than risk removing it"
+                "saved, so it was left alone rather than risk removing it. It "
+                f"keeps its old interval, not {interval}s; run install again to apply it"
             )
             return lines, True
         _launchctl("bootout", f"{domain}/{LABEL}")
@@ -193,7 +198,7 @@ def _install_agent() -> tuple[list[str], bool]:
                 else "could not restore the previous recorder"
             )
     if result.returncode == 0:
-        lines.append(f"recorder loaded, every {INTERVAL_SECONDS}s")
+        lines.append(f"recorder loaded, every {interval}s")
         return lines, True
     lines.append(f"FAILED to load the recorder: {(result.stderr or result.stdout).strip()}")
     return lines, False
