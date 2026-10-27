@@ -11,17 +11,22 @@ Nothing leaves the machine: agent-tabs makes no network connections.
 
 ## What it does with it
 
-`restore --go` types commands into iTerm tabs through AppleScript. What it types is built to be
-safe against what it recorded, because any local process controls its own argv and working
-directory:
+`restore --go` types commands into iTerm tabs through AppleScript. Any local process controls its
+own argv and working directory, so what is typed is built from recorded data with that in mind:
 
-- every command is `cd <working directory> && <resume command>`, with the directory quoted for
-  the shell;
-- session ids are only ever taken from a strict UUID match;
-- a recorded command line containing shell syntax is never replayed: it is reported and
-  downgraded to the bare `cd`;
+- every command starts with `cd <working directory>`, quoted for the shell;
+- for an agent tab, the rest is the agent's resume command, with a session id taken only from a
+  strict UUID match;
+- for any other tab that was running something (`ssh prod-box`, `tail -f app.log`), the rest is
+  **the recorded command line, replayed as it was**, unless it contains shell syntax, in which
+  case it is reported and downgraded to the bare `cd`;
 - it never types into the tab it was run from, nor into a tab that is running something unless
   you pass `--force`, and re-checks both immediately before typing.
+
+The shell-syntax filter stops a recorded command line from injecting more commands. It does not
+make the program or its arguments safe to run: replaying `ssh prod-box` is the point, and a
+process can rewrite its own argv. That is why restore is a dry run by default. **Read the plan
+before `--go`**; every replayed command is listed in it.
 
 Out of scope: anyone who can already write to `~/.agent-tabs/` as you, or type into your
 terminal, needs no help from agent-tabs.
@@ -32,6 +37,7 @@ Please don't open a public issue. Use GitHub's
 [private vulnerability reporting](https://github.com/levadadenys/agent-tabs/security/advisories/new)
 for this repository, with the steps to reproduce. You'll get an answer within a week.
 
-Especially welcome: any way to make `restore` type something other than the quoted `cd` and a
-resume command, to type into a tab doing something, or to expose a snapshot's contents to another
-user.
+Especially welcome: any way to get shell syntax past the filter, to make `restore` type into a
+tab doing something or into the tab it runs from, to start a session that is already running, or
+to expose a snapshot's contents to another user. Replaying a plain recorded command line is by
+design, as described above.
