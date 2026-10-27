@@ -264,6 +264,17 @@ def cmd_restore_all(args, snap, live) -> int:
 def cmd_restore(args) -> int:
     if not args.go:
         return _cmd_restore(args)
+    # The tab restore runs from is found through its terminal. Without one, the
+    # only thing keeping restore out of that tab is that it is busy, and
+    # --force turns that off.
+    if args.force and restore_mod.current_tty() is None:
+        print(
+            "Refusing --go --force without a terminal: restore cannot tell which "
+            "tab it is running from, and --force would let it type into that tab. "
+            "Run it from an iTerm tab, or drop --force.",
+            file=sys.stderr,
+        )
+        return 2
     # Only an executing restore types into tabs, so only it needs the lock; a
     # dry run can always be read, even while another restore is running.
     try:
@@ -385,7 +396,9 @@ def main() -> int:
         help="with --all: rebuild snapshot windows nothing matched in new windows",
     )
     p_restore.add_argument(
-        "--force", action="store_true", help="overwrite tabs already running an agent"
+        "--force",
+        action="store_true",
+        help="type into tabs that are running something (an agent, vim, ssh, ...)",
     )
     p_restore.set_defaults(func=cmd_restore)
 
