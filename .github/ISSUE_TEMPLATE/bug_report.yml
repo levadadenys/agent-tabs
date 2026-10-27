@@ -1,0 +1,39 @@
+name: Bug report
+description: Something behaves differently from what the README says
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste a snapshot file or unredacted `list`/`restore` output.** They hold every
+        tab's working directory, command line and session id, and a command line can carry a
+        credential. Replace paths, titles and ids with placeholders such as `/Users/you/project`.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: For example "restore --all paired window 2 with the wrong snapshot window".
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Dry-run output, redacted
+      description: The `agent-tabs restore ...` dry run (without `--go`) or `agent-tabs list` output that shows it.
+      render: text
+  - type: textarea
+    id: log
+    attributes:
+      label: Recorder log, if the snapshot was stale or missing
+      description: "`tail -20 ~/.agent-tabs/recorder.log`, redacted."
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: agent-tabs commit
+      description: "`git -C <your clone> rev-parse --short HEAD`"
+  - type: input
+    id: setup
+    attributes:
+      label: Setup
+      description: macOS version, iTerm2 version, `python3 --version`, and the agent CLIs involved (Claude Code, Codex, Grok) with their versions.
