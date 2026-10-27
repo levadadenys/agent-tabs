@@ -155,7 +155,17 @@ def _print_plan(window, actions, warnings) -> None:
 
 
 def _warnings_for(window: dict) -> dict:
-    return {t["tab_index"]: t["warning"] for t in window.get("tabs", []) if t.get("warning")}
+    warnings = {}
+    for tab in window.get("tabs", []):
+        parts = [tab["warning"]] if tab.get("warning") else []
+        # A line the plan downgrades (an older snapshot, held to today's filter)
+        # says so, with the original, exactly as a capture-time downgrade does.
+        note = adapters.checked_restore(tab)[1]
+        if note and note not in parts:
+            parts.append(note)
+        if parts:
+            warnings[tab["tab_index"]] = "; ".join(parts)
+    return warnings
 
 
 def cmd_restore_all(args, snap, live) -> int:
