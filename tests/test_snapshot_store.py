@@ -155,6 +155,18 @@ def test_an_unparseable_name_is_kept_only_within_the_floor():
         assert not junk.exists(), "it sorts oldest, so it goes first"
 
 
+def test_a_clock_jump_back_never_deletes_the_capture_just_written():
+    # After the clock goes back, every archive from the "lost" stretch is
+    # dated later than the new capture. With enough of them to fill the cap,
+    # dropping the oldest by time would drop the capture just written.
+    with tempfile.TemporaryDirectory() as tmp:
+        m = fresh_module(Path(tmp))
+        for k in range(200):
+            archive_at(m, -3600 - k)
+        _, new = m.save(snap_with(1))
+        assert new.exists(), "the capture just written was pruned"
+
+
 def test_a_future_dated_archive_does_not_cost_real_new_captures():
     # The clock went back: an archive from "tomorrow" sorts newest. The cap
     # must still drop the oldest real captures, not the new ones.
