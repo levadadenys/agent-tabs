@@ -153,10 +153,66 @@ def test_a_session_in_a_paired_and_a_new_window_starts_once():
         assert rec.started().count("dup") == 1, f"started twice: {rec.calls}"
 
 
+def test_go_force_without_a_terminal_types_nothing():
+    # Without a terminal restore cannot find the tab it runs from; only that
+    # tab being busy keeps restore out of it, and --force lifts exactly that.
+    with tempfile.TemporaryDirectory() as tmp:
+        rec = setup(Path(tmp), snap([("web", "s1")]), live(["web"]))
+        assert cli.cmd_restore(args(force=True)) == 2
+        assert rec.calls == [], f"typed with --force and no terminal: {rec.calls}"
+        # A terminal iTerm does not own (tmux, ssh) is no better: restore still
+        # cannot find its own tab.
+        restore.current_tty = lambda: "ttys555"  # type: ignore[assignment]
+        assert cli.cmd_restore(args(force=True)) == 2
+        assert rec.calls == [], f"typed with --force from a foreign terminal: {rec.calls}"
+        restore.current_tty = lambda: None  # type: ignore[assignment]
+        # Not --force, and not --go: both are still allowed without a terminal.
+        assert cli.cmd_restore(args(go=False, force=True)) == 0
+        assert cli.cmd_restore(args()) == 0
+        assert rec.started() == ["s1"], "setup: without --force, the restore runs"
+
+
+def test_a_plan_time_downgrade_is_shown_with_the_original():
+    # An older snapshot's line that today's filter rejects is typed as a bare
+    # cd; the plan must say so and keep the original, as a capture would.
+    import contextlib
+    import io
+
+    with tempfile.TemporaryDirectory() as tmp:
+        old = {
+            "captured_at": "2026-10-08T10:00:00+00:00",
+            "windows": [
+                {
+                    "window_index": 1,
+                    "tabs": [
+                        {
+                            "tab_index": 1,
+                            "pane_index": 1,
+                            "title": "web",
+                            "kind": "command",
+                            "cwd": "/srv",
+                            "session_id": None,
+                            "restore": "cd /srv && tail -f notes~",
+                        }
+                    ],
+                }
+            ],
+        }
+        setup(Path(tmp), old, live(["web"]))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            assert cli.cmd_restore(args(go=False)) == 0
+        printed = out.getvalue()
+        assert "tab  1  cd /srv\n" in printed, printed
+        assert "not replayed" in printed and "tail -f notes~" in printed, printed
+
+
 def test_force_is_passed_through_as_given():
     for force in (False, True):
         with tempfile.TemporaryDirectory() as tmp:
-            rec = setup(Path(tmp), snap([("web", "s1")]), live(["web"]))
+            rec = setup(Path(tmp), snap([("web", "s1")]), live(["web"], ["launcher"]))
+            # From an iTerm tab (window 2's): without one, --go --force is refused.
+            restore.current_tty = lambda: "ttys21"  # type: ignore[assignment]
             assert cli.cmd_restore(args(force=force)) == 0
             assert [f for _, f, _ in rec.calls] == [force], rec.calls
 

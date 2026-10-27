@@ -19,8 +19,54 @@ UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
 
 # Characters that make a shell do something other than run one command. A
 # recorded command line is replayed verbatim, so anything carrying these is not
-# safe to type into a shell unattended.
-SHELL_METACHARACTERS = set(";&|<>`$()\n\r\\!*?{}[]\"'")
+# safe to type into a shell unattended. `~`, `^` and `#` are zsh's: tilde
+# expansion, and glob operators anywhere in a word under extendedglob (`#` also
+# starts a comment).
+SHELL_METACHARACTERS = set(";&|<>`$()\n\r\\!*?{}[]\"'~^#")
+
+
+def _has_shell_syntax(command: str) -> bool:
+    # A word starting with `=` is zsh's path expansion (`=ls` is /bin/ls), and
+    # with MAGIC_EQUAL_SUBST so is `==` inside one (`x==ls` is x=/bin/ls). A
+    # single `=` mid-word is left alone: `--port=3000` must still replay.
+    return bool(set(command) & SHELL_METACHARACTERS) or any(
+        word.startswith("=") or "==" in word for word in command.split()
+    )
+
+
+def not_replayed_note(command: str) -> str:
+    """What a downgraded tab says, so the original can still be run by hand."""
+    return (
+        "command contains shell syntax and was not replayed; "
+        f"run it yourself if you trust it: {command}"
+    )
+
+
+def checked_restore(tab: dict) -> tuple[str, str | None]:
+    """A tab's restore command, re-checked against the current filter.
+
+    The filter runs at capture, so a snapshot taken by an older version, or the
+    pinned pre-boot copy, can hold a line it would now reject; that line is
+    downgraded to the bare cd here, as it would be at capture, and the note
+    that capture would have recorded is returned with it. Only command and ssh
+    tabs replay recorded text; agent and shell restores were built at capture
+    from validated parts. A hand-edited snapshot is out of scope (SECURITY.md).
+    """
+    restore = tab.get("restore") or ""
+    if tab.get("kind") not in ("command", "ssh"):
+        return restore, None
+    prefix = _cd(tab.get("cwd"))
+    if restore == prefix:
+        return restore, None  # already the bare cd
+    if prefix and not restore.startswith(prefix + " && "):
+        # Capture always writes `cd <cwd> && <command>`; anything else was not
+        # written by it, so only the cd it should have had is typed.
+        return prefix, not_replayed_note(restore)
+    replayed = restore[len(prefix) + 4 :] if prefix else restore
+    if _has_shell_syntax(replayed):
+        return prefix, not_replayed_note(replayed)
+    return restore, None
+
 
 HOME = Path.home()
 CLAUDE_SESSIONS = HOME / ".claude" / "sessions"
@@ -147,12 +193,9 @@ def resolve_command(proc: procs.Proc, cwd: str | None) -> dict:
     arbitrary process controls and this runs unattended, long after capture.
     """
     kind = "ssh" if proc.argv0 == "ssh" else "command"
-    if set(proc.command) & SHELL_METACHARACTERS:
+    if _has_shell_syntax(proc.command):
         result = _result(kind, None, cwd, "")
-        note = (
-            "command contains shell syntax and was not replayed; "
-            f"run it yourself if you trust it: {proc.command}"
-        )
+        note = not_replayed_note(proc.command)
         # Keep any cwd warning too rather than replacing it.
         result["warning"] = f"{result['warning']}; {note}" if result["warning"] else note
         return result

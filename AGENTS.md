@@ -116,7 +116,17 @@ an issue.
 - Never start a session that is already running anywhere, or twice in one
   restore. Check at planning time AND immediately before typing, and hold
   `restore_lock()` around any `--go`. `--force` does not override this.
-- Never replay a recorded command line containing shell syntax.
+- Never replay a recorded command line containing shell syntax, zsh's
+  included: the macOS default shell expands `~`, `=cmd`, and `^`/`#` under
+  `extendedglob`, which a bash-minded filter misses. Filter at capture AND
+  when planning, so an old snapshot is held to the current rules.
+- Parse `ps` and `lsof` output on `\n` only, never `splitlines()`: `ps`
+  passes Unicode line separators in argv through, and splitting on them lets
+  any process, of any user, forge a process line on another tab's tty.
+- Refuse `--go --force` unless restore finds its own tab among iTerm's: it is
+  found through the tty, and with no terminal, or one iTerm does not own
+  (tmux, ssh), only that tab being busy keeps restore out of it, which is
+  exactly what `--force` lifts.
 - Target windows by iTerm's window **id**, never its index: the index is
   front-to-back position and changes whenever a window is focused.
 - Pair a live window with a snapshot window only when the pairing is forced —

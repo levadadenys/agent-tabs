@@ -28,8 +28,10 @@ a crash or reboot.
   restore (#5).
 - A dry run unless `--go`. Never types into a tab holding live work or the tab it runs from, never
   starts a session that is already running anywhere, and never replays a command line containing
-  shell syntax. Busy tabs and running sessions are re-checked immediately before typing
-  (#4, #5).
+  shell syntax, zsh's included, checked at capture and again when planning. `--go --force` is
+  refused unless restore runs in an iTerm tab. Busy tabs and running sessions are re-checked
+  immediately before typing (#4, #5).
+- A process cannot pose as another tab's process through a line separator in its arguments.
 
 ### Project
 - Contributor guide, a pre-push hook that refuses home paths and personal emails (gitleaks), and

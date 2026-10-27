@@ -155,7 +155,17 @@ def _print_plan(window, actions, warnings) -> None:
 
 
 def _warnings_for(window: dict) -> dict:
-    return {t["tab_index"]: t["warning"] for t in window.get("tabs", []) if t.get("warning")}
+    warnings = {}
+    for tab in window.get("tabs", []):
+        parts = [tab["warning"]] if tab.get("warning") else []
+        # A line the plan downgrades (an older snapshot, held to today's filter)
+        # says so, with the original, exactly as a capture-time downgrade does.
+        note = adapters.checked_restore(tab)[1]
+        if note and note not in parts:
+            parts.append(note)
+        if parts:
+            warnings[tab["tab_index"]] = "; ".join(parts)
+    return warnings
 
 
 def cmd_restore_all(args, snap, live) -> int:
@@ -291,6 +301,18 @@ def _cmd_restore(args) -> int:
     snap = snap_mod.load(Path(args.file) if args.file else None)
     _warn_if_replaced(snap)
     live = restore_mod.live_tabs()
+    # restore finds the tab it runs from through its terminal. With no terminal,
+    # or one iTerm does not own (tmux, ssh), it cannot, and then only that tab
+    # being busy keeps restore out of it -- exactly what --force turns off.
+    if args.go and args.force and restore_mod.current_window_id(live) is None:
+        print(
+            "Refusing --go --force: restore cannot find the iTerm tab it is running "
+            "from (no terminal, or one iTerm does not own, such as tmux or ssh), and "
+            "--force would let it type into that tab. Run it from an iTerm tab, or "
+            "drop --force.",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.all:
         return cmd_restore_all(args, snap, live)
@@ -385,7 +407,9 @@ def main() -> int:
         help="with --all: rebuild snapshot windows nothing matched in new windows",
     )
     p_restore.add_argument(
-        "--force", action="store_true", help="overwrite tabs already running an agent"
+        "--force",
+        action="store_true",
+        help="type into tabs that are running something (an agent, vim, ssh, ...)",
     )
     p_restore.set_defaults(func=cmd_restore)
 

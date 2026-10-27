@@ -143,7 +143,9 @@ Restore types into live shells, so it is conservative by default:
 - **Dry run** unless you pass `--go`.
 - **Never types into a tab doing something** — an agent, but equally `vim`,
   `psql` or an `ssh` session, where typed text would run on the remote host.
-  Override with `--force`. It also never types into the tab it runs from.
+  Override with `--force`, which is refused unless restore runs in an iTerm
+  tab (not a script, tmux or ssh): otherwise it could not tell which tab is its
+  own. It also never types into the tab it runs from.
   Liveness is checked again immediately before typing, not only when planning.
 - **Never starts a session that is already running** anywhere, in any window
   — nor twice in one restore, if the snapshot lists it in two tabs. This is

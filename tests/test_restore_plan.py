@@ -118,6 +118,51 @@ def test_new_window_target_ignores_live_busy_state():
     assert actions[1].will_run, "a fresh window has no busy tabs to protect"
 
 
+def test_an_old_snapshot_is_filtered_again_when_planning():
+    # The filter runs at capture. A snapshot from an older version, or the
+    # pinned pre-boot copy, can hold a line it now rejects; the plan must not
+    # type it just because it was accepted then.
+    window = {
+        "window_index": 1,
+        "tabs": [
+            {
+                "tab_index": 1,
+                "pane_index": 1,
+                "title": "logs",
+                "kind": "command",
+                "cwd": "/srv",
+                "restore": "cd /srv && tail -f notes~",
+            },
+            {
+                "tab_index": 2,
+                "pane_index": 1,
+                "title": "box",
+                "kind": "ssh",
+                "cwd": "/srv",
+                "restore": "cd /srv && ssh box",
+            },
+        ],
+    }
+    restore.current_tty = lambda: None  # type: ignore[assignment]
+    actions = {a.tab_index: a for a in restore.plan(window, [], None, False)}
+    assert actions[1].command == "cd /srv", actions[1].command
+    assert actions[2].command == "cd /srv && ssh box", "a plain line must still replay"
+
+
+def test_a_line_capture_could_not_have_written_types_only_the_cd():
+    # Capture always writes `cd <cwd> && <command>`; a command line without
+    # that prefix did not come from it, metacharacters or not.
+    from agent_tabs import adapters
+
+    for restore_line in ("rm -rf build", "cd /elsewhere"):
+        tab = {"kind": "command", "cwd": "/srv", "restore": restore_line}
+        command, note = adapters.checked_restore(tab)
+        assert command == "cd /srv", (restore_line, command)
+        assert note and restore_line in note
+    spaced = {"kind": "ssh", "cwd": "/a b", "restore": "cd '/a b' && ssh box"}
+    assert adapters.checked_restore(spaced) == ("cd '/a b' && ssh box", None)
+
+
 if __name__ == "__main__":
     import traceback
 

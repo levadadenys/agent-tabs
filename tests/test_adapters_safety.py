@@ -73,6 +73,31 @@ def test_command_with_shell_syntax_is_not_replayed():
     assert hostile in got["warning"]
 
 
+def test_zsh_expansions_are_not_replayed():
+    # zsh is the macOS default shell. These pass a bash-minded filter but
+    # still expand: a home directory, a path lookup, a glob, a comment.
+    for hostile in (
+        "ls ~root",
+        "tail -f notes~",
+        "=cat notes",
+        "git log HEAD^",
+        "grep x# file",
+        "ssh host #rest",
+        "tail x==ls",
+    ):
+        got = adapters.resolve_command(proc(hostile), "/home/me")
+        assert got["restore"] == "cd /home/me", (hostile, got["restore"])
+        assert got["warning"] and "shell syntax" in got["warning"], hostile
+
+
+def test_assignment_style_arguments_still_replay():
+    # `=` only expands at the start of a word; rejecting it anywhere would stop
+    # ordinary long-running commands from being restored at all.
+    for plain in ("npm run dev -- --port=3000", "ssh -o ConnectTimeout=5 host"):
+        got = adapters.resolve_command(proc(plain), "/home/me")
+        assert got["restore"] == f"cd /home/me && {plain}", got["restore"]
+
+
 def test_agent_kinds_derive_from_the_resolver_table():
     # Three copies of this set previously drifted apart; keep them derived.
     assert adapters.AGENT_KINDS == frozenset(adapters.AGENT_RESOLVERS)

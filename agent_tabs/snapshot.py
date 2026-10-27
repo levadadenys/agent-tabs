@@ -345,6 +345,10 @@ def save(snap: dict) -> tuple[Path | None, Path]:
     # Microseconds: two captures in the same second must not collide.
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
     archive = HISTORY_DIR / f"{stamp}.json"
+    # Harden the state directory itself, not only history/: creating history/
+    # makes its parent with the default umask, and a capture with no agent
+    # sessions returns before snapshot.json would harden it.
+    _harden(STATE_DIR)
     _write_atomic(archive, snap)
     _prune_history()
 

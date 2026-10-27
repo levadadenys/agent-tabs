@@ -59,7 +59,11 @@ def process_table() -> list[Proc]:
         check=False,
     ).stdout
     procs: list[Proc] = []
-    for line in out.splitlines():
+    # Split on newlines only. ps escapes a newline in argv as \012, but passes
+    # Unicode line separators (U+2028 and others) through, and splitlines()
+    # breaks on those too: a process could then forge a whole extra line, a
+    # fake process on another tab's tty whose command restore would replay.
+    for line in out.split("\n"):
         parts = line.split(None, 3)
         if len(parts) < 4:
             continue
@@ -129,7 +133,7 @@ def cwd_of(pids: list[int]) -> dict[int, str]:
     ).stdout
     result: dict[int, str] = {}
     current: int | None = None
-    for line in out.splitlines():
+    for line in out.split("\n"):
         if line.startswith("p"):
             try:
                 current = int(line[1:])
@@ -150,4 +154,4 @@ def open_files(pid: int) -> list[str]:
         errors="replace",
         check=False,
     ).stdout
-    return [line[1:] for line in out.splitlines() if line.startswith("n")]
+    return [line[1:] for line in out.split("\n") if line.startswith("n")]
