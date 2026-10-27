@@ -12,8 +12,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import install  # noqa: E402
-from runner import run  # noqa: E402
+from runner import run
+
+from agent_tabs import install
 
 
 class Sandbox:
@@ -103,7 +104,8 @@ def test_a_successful_load_removes_the_legacy_recorder():
 def test_a_running_legacy_recorder_is_stopped():
     # Unlinking the script does not stop a process iTerm already started; both
     # would then capture every 30s and race on snapshot.json.
-    import os, subprocess, time
+    import subprocess
+    import time
     with Sandbox(0):
         script = install.LEGACY_AUTOLAUNCH
         script.parent.mkdir(parents=True, exist_ok=True)
@@ -131,7 +133,9 @@ def test_a_running_legacy_recorder_is_stopped():
 def test_an_unrelated_process_with_the_same_basename_is_spared():
     # Matching the basename would signal any process whose command line merely
     # mentions the script -- including a real recorder while tests run.
-    import subprocess, tempfile, time
+    import subprocess
+    import tempfile
+    import time
     with Sandbox(0):
         other_dir = tempfile.mkdtemp()
         decoy = Path(other_dir) / install.LEGACY_AUTOLAUNCH.name
@@ -159,7 +163,7 @@ def test_a_failed_load_leaves_the_legacy_recorder_alone():
 def test_a_failed_reinstall_restores_the_previous_job():
     # Tearing down a healthy recorder and then failing to replace it is worse
     # than not upgrading at all.
-    with Sandbox(1, "bootstrap refused") as root:
+    with Sandbox(1, "bootstrap refused"):
         install.AGENT_DIR.mkdir(parents=True, exist_ok=True)
         install.AGENT_PLIST.write_bytes(b"PREVIOUS")
         install.run()
