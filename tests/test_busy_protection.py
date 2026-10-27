@@ -10,8 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import procs, restore  # noqa: E402
-from runner import run  # noqa: E402
+from runner import run
+
+from agent_tabs import procs, restore
 
 
 def proc(command: str) -> procs.Proc:
