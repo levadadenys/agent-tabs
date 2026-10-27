@@ -84,9 +84,12 @@ class Backend(Protocol):
   without stable window ids cannot be supported.
 - **Tab addressing.** Today a tab is addressed by its position in a stable
   window. Where a backend has stable tab ids (tmux, WezTerm, kitty), plan by id
-  and type by id. That closes the "tabs reordered between the dry run and
-  `--go`" limit the README lists. Where it has none (iTerm2, Terminal.app),
-  position stays.
+  and type by id. That closes the gap between planning and typing *within one
+  run*. It does not close the README's "tabs reordered between the dry run and
+  `--go`" limit: each invocation lists and plans afresh, so a reordered tab can
+  still be bound to a different snapshot position. Closing that needs the dry
+  run's plan persisted and validated by `--go`, a separate design. Where a
+  backend has no tab ids (iTerm2, Terminal.app), position stays.
 - **Busy detection, re-checked at execute time.** `list_panes()` is called
   again just before typing (`execute`, `_tty_of` and `ensure_tabs` all
   re-list today), and joined to processes. `busy_hint` adds what only the
@@ -153,8 +156,11 @@ Effort assumes the interface exists. S is days, M about a week, L more.
   existing macOS runners or on Linux. A Linux job would be a second workflow,
   so that part is a cost saving, not a necessity.
 - **What it brings:** Linux (with the `/proc` layer below), any terminal
-  emulator on top, and remote machines over ssh. Panes are first-class, so
-  split panes could be recreated, which iTerm2 cannot do here.
+  emulator on top, and remote machines over ssh. Panes are first-class, which
+  would make split-pane recreation *possible*. It is not in scope here: the
+  interface has no pane creation and `type_into` no pane target, and the
+  planner keeps only each tab's first pane (`seen_tabs` in `restore.plan`).
+  Recreating splits is a later step with its own design.
 - **What breaks or changes:**
   - **No server is a state.** `tmux list-panes` errors when no server runs;
     `is_running()` must report that, not raise.
@@ -208,7 +214,9 @@ Effort assumes the interface exists. S is days, M about a week, L more.
     window with an `id`, title, cwd, pid and command line.
   - Creating: `kitten @ launch --type=os-window|tab --cwd` prints the new
     window's id.
-  - Typing: `kitten @ send-text --match id:N`.
+  - Typing: `kitten @ send-text --match id:N --stdin`, with the command on
+    stdin. Positional text follows Python escaping rules, which could change
+    a quoted path.
   - `own_pane()` from `$KITTY_WINDOW_ID`.
 - **Feasibility:** medium. Remote control is off by default. A recorder outside
   kitty needs the user to set `allow_remote_control` and a `listen_on` socket.
@@ -223,6 +231,8 @@ Effort assumes the interface exists. S is days, M about a week, L more.
     which the prose docs do not spell out.
   - Whether `send-text` reports a missing window: the docs say errors are not
     reported.
+  - That `--stdin` text arrives literally, with Enter, and without
+    bracketed-paste framing.
   - The process join is by **pid**: see "Process join" above.
 - **Effort:** S–M for the code, plus documentation of the trade-off.
 
@@ -271,8 +281,11 @@ Effort assumes the interface exists. S is days, M about a week, L more.
   the command name can contain spaces and parentheses. It gives the ppid,
   `tty_nr` and `tpgid` (the foreground process group, which identifies the
   foreground process more directly than today's walk down from the shell).
-  `tty_nr` is a device number, not a name. Map it through its major and minor
-  numbers to `pts/N`, or read the name from `readlink /proc/<pid>/fd/0`.
+  `tty_nr` is a device number, not a name: map it through its major and minor
+  numbers to `pts/N`. Not via `readlink /proc/<pid>/fd/0`: a foreground command
+  can redirect stdin to a file and still own the terminal, and joining on stdin
+  would hide that live work from the busy check. A device that cannot be
+  resolved counts as busy.
 - **Argv:** read from `/proc/<pid>/cmdline`, which is NUL-separated, so argument
   boundaries survive. They cannot be *replayed* as such, though. Restore types
   one line into a shell, preserving boundaries would need quoting, and the
@@ -300,8 +313,8 @@ cannot pass on one layer while production uses the other.
    assertion preserved; pairing re-keyed on `window_key`. One to two weeks.
 2. **tmux, on macOS first.** It reuses the macOS process layer (`pane_tty` is
    a `/dev/ttysNNN` that `normalise_tty` already handles). It can be tested for
-   real in CI with no display, brings split-pane recreation and stable tab
-   ids, and needs no new permission model.
+   real in CI with no display, brings stable tab ids, and needs no new
+   permission model.
 3. **The Linux process layer and a systemd recorder.** Together with tmux, this
    is Linux support: the largest new audience for the least new surface.
 4. **WezTerm**, once its open questions are answered. It is the best-documented
