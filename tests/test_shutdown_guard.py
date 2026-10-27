@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from runner import run  # noqa: E402
+from runner import run
 
 
 def fresh(state: Path, settle: float = 0):
@@ -195,7 +195,8 @@ def test_no_extra_mutable_state_is_kept():
 
 def test_a_collapse_spanning_the_settle_window_is_accepted():
     # Backdated archives stand in for captures 30s apart.
-    from datetime import datetime, timedelta, timezone as tz
+    from datetime import datetime, timedelta
+    from datetime import timezone as tz
     with tempfile.TemporaryDirectory() as tmp:
         m = fresh(Path(tmp), settle=45)
         m.save(snap(22, "FULL"))
@@ -229,8 +230,10 @@ def test_concurrent_saves_do_not_corrupt_the_decision():
         def worker(n):
             results.append(m.save(snap(3, f"race{n}"))[0])
         threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         assert m.load()["captured_at"] == "FULL", (
             "a racing pair of collapsed captures promoted over the full snapshot"
         )
