@@ -13,6 +13,7 @@ You need macOS, iTerm2 and Python 3.9 or later; agent-tabs itself has no depende
 git clone https://github.com/levadadenys/agent-tabs && cd agent-tabs
 python3 tests/run_all.py                          # standard library only
 pip install -r requirements-dev.txt               # ruff and mypy, pinned
+brew install shellcheck                           # for the pre-push hook's check
 ruff check . && ruff format --check . && mypy && shellcheck .githooks/pre-push
 ```
 
