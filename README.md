@@ -213,7 +213,7 @@ last captures before a reboot are half-dead ones from the shutdown, and one
 can reach `snapshot.json` if the shutdown drags on. Not history alone either:
 after a long idle spell it may no longer hold the fleet. That matters if iTerm restored nothing and you started a
 session before restoring: that small capture replaces `snapshot.json` about a
-minute later, and history rotates the full one out within half an hour. When
+minute later, and history rotates the full one out after about half an hour. When
 that has happened, `list` and `restore` say so and print the command to restore
 the pre-reboot fleet instead:
 
@@ -278,8 +278,9 @@ at, and corrects a value out of range or not a whole number:
 {"interval_seconds": 60}
 ```
 
-History is kept by age, not count, so it covers the same half hour at any
-interval. `AGENT_TABS_HOME` relocates `~/.agent-tabs`, mainly for testing.
+History is kept by age, not count: the last half hour at any interval, and
+never fewer than 60 captures, so at a long interval it reaches further back (at
+300 s, about 5 hours). `AGENT_TABS_HOME` relocates `~/.agent-tabs`, mainly for testing.
 
 ## Limits
 
