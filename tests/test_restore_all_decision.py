@@ -10,8 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import restore  # noqa: E402
-from runner import run  # noqa: E402
+from runner import run
+
+from agent_tabs import restore
 
 
 def snap(*windows):
@@ -44,7 +45,7 @@ def test_the_launcher_window_is_never_paired():
     """Even an exact match: one of its tabs is the one being typed in, so
     pairing it can only restore that snapshot window partly."""
     s = snap(["web", "api"], ["notes"])
-    pairs, create, reported, notes = decide(s, live(["web", "api"], ["notes"]), launcher=1)
+    pairs, _create, reported, notes = decide(s, live(["web", "api"], ["notes"]), launcher=1)
     assert pairs == [(2, 2)], pairs
     # Not "no live window matched": one did, the launcher, and the note says so.
     assert reported == [], reported
@@ -173,7 +174,7 @@ def test_an_ambiguous_window_is_reported_not_rebuilt():
     # Live 2 might be snapshot 1 or 2; rebuilding either would sidestep the tie
     # and leave the window that may be the real one idle.
     s = snap(["notes", "a"], ["notes", "b"], ["solo"])
-    pairs, create, reported, notes = decide(
+    _pairs, create, reported, notes = decide(
         s, live(["-zsh"], ["notes"]), launcher=1, create_missing=True
     )
     assert create == [3], (create, notes)
@@ -237,7 +238,7 @@ def test_every_canonical_shell_is_not_evidence():
     for base in procs.SHELL_NAMES | procs.LOGIN_NAMES:
         for title in (base, f"-{base}"):
             s = snap(["web", title])
-            pairs, create, _, _, _ = restore.decide_restore_all(s, live([title]), None, False)
+            pairs, _create, _, _, _ = restore.decide_restore_all(s, live([title]), None, False)
             assert pairs == [], f"paired on the shell title {title!r}"
 
 
