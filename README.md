@@ -11,10 +11,16 @@ reboot.** agent-tabs records which Claude Code, Codex or Grok session runs in
 which iTerm2 window and tab, and in which directory. After a crash it rebuilds
 those windows and resumes each session where it was.
 
-It does not save or read your conversations: the agents keep those on disk
-themselves, and agent-tabs records only the grouping around them. It makes no
-network connections, needs nothing beyond the Python that ships with macOS, and
-types nothing until you pass `--go`. macOS and iTerm2 only.
+It does not save or read your conversations; the agents keep those on disk
+themselves. For each tab it records the directory, the tab title, the command
+running there and the agent's session id, in `~/.agent-tabs`, readable only by
+you. It makes no network connections, needs nothing beyond the Python that
+ships with macOS, and types nothing until you pass `--go`. macOS and iTerm2
+only.
+
+**Quick start:** [install](#install) it once. After a crash or reboot, open a
+new iTerm window and run `agent-tabs restore --all --create-missing` to see the
+plan, then again with `--go` to carry it out.
 
 <!-- Demo: record a reboot restore (`agent-tabs restore --all --create-missing`,
      dry run then --go) and save it as docs/demo.gif, then replace this comment:
@@ -63,11 +69,15 @@ That:
 No iTerm restart is needed, and recording continues across iTerm restarts.
 Check it with `agent-tabs list`: the snapshot should be seconds old.
 
+If your shell says `agent-tabs: command not found`, `~/.local/bin` is not on
+your `PATH` (it is not, on a fresh macOS). Add it, then open a new tab:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
 `install` exits non-zero if the recorder fails to load, so a script can rely on
-its exit code. An earlier version ran the recorder from iTerm2's
-`Scripts/AutoLaunch/` folder; that needed iTerm's Python runtime, which is not
-installed by default, so it could fail silently. `install` removes that old
-entry when it finds one.
+its exit code.
 
 ### Stop or uninstall
 
@@ -197,67 +207,46 @@ Restore types into live shells, so it is conservative by default:
 
 ### How `--all` pairs windows
 
-A wrong pairing types one window's sessions into another, so:
-
-- windows are matched by how many tab titles they share, as a one-to-one
-  assignment that maximises total overlap — a snapshot window goes to at most
-  one live window. A title that is only a shell name (`-zsh`, `bash`, …) does
-  not count: every idle tab looks like that;
-- the window `--all` runs in is never filled, since one of its tabs is the one
-  being typed in. Run it from a new window. Run from inside a restored window
-  instead, it is reported, and running again from a new window restores it —
-  anything already running is skipped. Meanwhile it neither hands its snapshot
-  window to another window nor settles another window's tie: a pairing is kept
-  only if it is the same with and without that window, and any other is
-  reported;
-- a pairing is used only when it is **forced**: the same in every best
-  assignment. If the evidence fits two pairings equally well, those windows are
-  reported, never guessed;
-- a group of windows tangled by shared titles — more than 12 live windows, or
-  more than 12 snapshot windows they could be — is reported rather than
-  matched;
-- windows are targeted by iTerm's stable window id, not their position, which
-  changes whenever you focus a window.
-
-Anything not paired is listed with the command that restores it. A snapshot
-window that an unpaired live window might be is listed as such, with the
-command for either case, rather than as unmatched.
+A wrong pairing would type one window's sessions into another, so each live
+window is paired with the snapshot window whose tab titles it shares most, one
+to one, and only when the evidence leaves no other choice. Ties are reported,
+never guessed; a title that is only a shell name (`-zsh`) does not count; the
+window you run it from is never paired. Anything not paired is listed with the
+command that restores it. The full rules are in
+[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md#pairing-live-windows-with-snapshot-windows-restore---all).
 
 ## Snapshots and reboots
+
+A **snapshot** is the record of every window, tab and session at one moment.
+The recorder takes one per capture; the newest one worth trusting is kept as
+`snapshot.json`, and that is what `list` and `restore` use.
 
 - `~/.agent-tabs/snapshot.json` — the snapshot `list` and `restore` use
 - `~/.agent-tabs/history/` — every capture from the last half hour, never fewer
   than the newest 60 (so a long sleep does not empty it), at most 180
-- `~/.agent-tabs/pre-boot.json` — the last snapshot from before the most recent reboot
+- `~/.agent-tabs/pre-boot.json` — the fullest snapshot from before the most
+  recent reboot
 - `~/.agent-tabs/recorder.log` — recorder errors
 
-A capture is not always promoted to `snapshot.json`, because the moment a
-snapshot matters most is a shutdown, when tabs die one at a time:
+A capture does not always replace `snapshot.json`, because the moment it
+matters most is a shutdown, when tabs close one by one. A capture with no agent
+sessions never does. One that lost a third or more of the sessions waits until
+the drop has lasted three captures and 45 seconds (about a minute at the
+default interval); a shutdown is over long before that. Closing a tab or two is
+taken at once.
 
-- a capture with **no** agent sessions is never promoted;
-- a capture that **collapsed** — kept less than 67% of the last good one's
-  sessions — is held back until the drop has lasted three captures in a row and
-  at least 45 seconds: about a minute at the default interval, 50 seconds at
-  10 s, 10 minutes at 300 s. A shutdown is over long before that. Genuinely
-  closing most of your sessions is accepted after that; closing a tab or two is
-  promoted immediately.
-
-**Across a reboot**, the first promotion after boot pins the pre-reboot fleet
-in `pre-boot.json`: the fuller of the outgoing `snapshot.json` and the fullest
-capture from before the reboot still in history. Not simply the newest: the
-last captures before a reboot are half-dead ones from the shutdown, and one
-can reach `snapshot.json` if the shutdown drags on. Not history alone either:
-after a long idle spell it may no longer hold the fleet. That matters if iTerm restored nothing and you started a
-session before restoring: that small capture replaces `snapshot.json` about a
-minute later, and history rotates the full one out after about half an hour. When
-that has happened, `list` and `restore` say so and print the command to restore
-the pre-reboot fleet instead:
+After a reboot, the first snapshot taken also saves the pre-reboot sessions in
+`pre-boot.json`. If a small post-reboot capture has replaced `snapshot.json`
+before you restored, `list` and `restore` say so and print the command to use
+instead:
 
 ```bash
 agent-tabs restore --all --create-missing -f ~/.agent-tabs/pre-boot.json
 ```
 
-Any capture in `history/` can be restored the same way with `-f`.
+Any capture in `history/` can be restored the same way with `-f`. The rules,
+and why each exists, are in
+[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md#which-capture-becomes-the-snapshot).
 
 ## Troubleshooting
 
@@ -334,9 +323,10 @@ never fewer than 60 captures, so at a long interval it reaches further back (at
   recorded command has no session to check, so restoring the same snapshot
   twice into new windows — two `--create-missing` runs whose first windows no
   longer match — runs it twice. Read the dry run.
-- The collapse guard compares a new capture with the last good one. If
-  `snapshot.json` is unreadable and history holds no capture with sessions, a
-  small capture can replace it; `pre-boot.json` still holds the pre-reboot fleet.
+- A capture that lost most of its sessions is held back by comparing it with
+  the last good snapshot. If `snapshot.json` is unreadable and history holds no
+  capture with sessions, there is nothing to compare with, and a small capture
+  can replace it; `pre-boot.json` still holds the pre-reboot sessions.
 - Tab positions are read when planning. Reordering tabs *within* a window
   between the dry run and `--go` could put a command in the wrong tab of the
   right window.
@@ -345,7 +335,7 @@ never fewer than 60 captures, so at a long interval it reaches further back (at
 
 - A genuine crash has been restored from, window by window.
 - `restore --all`, `--create-missing` and the pre-reboot copy are covered by
-  the test suite and by dry runs against a live fleet of 30+ sessions (macOS
+  the test suite and by dry runs against 30+ live sessions (macOS
   26.3, iTerm2 3.6.9), but **not yet through a real reboot**.
 - The recorder has run unattended under launchd since September 2026.
 
@@ -387,7 +377,7 @@ uninstall](#stop-or-uninstall): the launchd job, two symlinks and
 ## Roadmap
 
 - **More terminals:** Terminal.app, Ghostty, WezTerm, kitty, and tmux, which
-  would also bring Linux. A design is being written up before any is built.
+  would also bring Linux.
 - **Split panes** recreated, not only recorded.
 - **A real reboot** restored from, and the result recorded above.
 
@@ -412,12 +402,6 @@ snapshot tests exercise actual filesystem state. The window matcher is also
 checked against an independent brute-force oracle on hundreds of random
 instances. Each test was mutation-checked: reverting the fix it covers makes it
 fail.
-
-Each module runs with a private, empty bytecode cache (`PYTHONPYCACHEPREFIX`).
-When mutating by hand, an edit of the same byte length restored with a matching
-mtime passes Python's mtime+size check, and the tests silently keep running the
-stale mutant. `-B` does **not** prevent this — it only stops *writing* `.pyc`
-files. Outside this runner, set `PYTHONPYCACHEPREFIX=$(mktemp -d)`.
 
 ## Contributing
 
