@@ -30,20 +30,43 @@ _loader.exec_module(cli)
 
 def snap(*windows):
     """Each window is a list of (title, session id) tabs."""
-    return {"captured_at": "2026-10-08T10:00:00+00:00", "windows": [
-        {"window_index": i + 1, "tabs": [
-            {"tab_index": j + 1, "pane_index": 1, "title": title, "kind": "claude",
-             "session_id": sid, "restore": f"claude --resume {sid}"}
-            for j, (title, sid) in enumerate(tabs)]}
-        for i, tabs in enumerate(windows)]}
+    return {
+        "captured_at": "2026-10-08T10:00:00+00:00",
+        "windows": [
+            {
+                "window_index": i + 1,
+                "tabs": [
+                    {
+                        "tab_index": j + 1,
+                        "pane_index": 1,
+                        "title": title,
+                        "kind": "claude",
+                        "session_id": sid,
+                        "restore": f"claude --resume {sid}",
+                    }
+                    for j, (title, sid) in enumerate(tabs)
+                ],
+            }
+            for i, tabs in enumerate(windows)
+        ],
+    }
 
 
 def live(*windows):
     return [
-        {"window_index": wi, "window_id": f"w{wi}", "tab_index": ti, "pane_index": 1,
-         "tty": f"/dev/ttys{wi}{ti}", "title": t, "kind": None, "busy": False}
+        {
+            "window_index": wi,
+            "window_id": f"w{wi}",
+            "tab_index": ti,
+            "pane_index": 1,
+            "tty": f"/dev/ttys{wi}{ti}",
+            "title": t,
+            "kind": None,
+            "busy": False,
+        }
         for wi, titles in enumerate(windows, start=1)
-        for ti, t in enumerate(titles, start=1)]
+        for ti, t in enumerate(titles, start=1)
+    ]
 
 
 class Recorder:
@@ -83,8 +106,15 @@ def _no_real_windows(*_):
 
 
 def args(**overrides):
-    base = dict(file=None, go=True, all=True, create_missing=False, window=None,
-                new_window=False, force=False)
+    base = dict(
+        file=None,
+        go=True,
+        all=True,
+        create_missing=False,
+        window=None,
+        new_window=False,
+        force=False,
+    )
     return argparse.Namespace(**{**base, **overrides})
 
 
@@ -134,6 +164,7 @@ def test_force_is_passed_through_as_given():
 def test_window_counts_name_only_windows_that_start_something():
     import contextlib
     import io
+
     with tempfile.TemporaryDirectory() as tmp:
         the_snap = snap([("web", "s1")], [("api", "s2")])
         setup(Path(tmp), the_snap, live(["web"], ["api"]))
@@ -157,6 +188,7 @@ def test_a_single_window_new_window_restore_goes_through_the_recheck():
 def test_flag_errors_come_before_touching_iterm():
     def boom():
         raise AssertionError("asked iTerm before validating flags")
+
     with tempfile.TemporaryDirectory() as tmp:
         setup(Path(tmp), snap([("web", "s1")]), live(["web"]))
         restore.live_tabs = boom  # type: ignore[assignment]
