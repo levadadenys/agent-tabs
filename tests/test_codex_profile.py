@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent_tabs import adapters, config, procs  # noqa: E402
+from agent_tabs import adapters, config, procs
 
 UUID = "01a08085-3793-7381-aee8-61af378efc44"
 
