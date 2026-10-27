@@ -34,25 +34,36 @@ def _has_shell_syntax(command: str) -> bool:
     )
 
 
-def checked_restore(tab: dict) -> str:
+def not_replayed_note(command: str) -> str:
+    """What a downgraded tab says, so the original can still be run by hand."""
+    return (
+        "command contains shell syntax and was not replayed; "
+        f"run it yourself if you trust it: {command}"
+    )
+
+
+def checked_restore(tab: dict) -> tuple[str, str | None]:
     """A tab's restore command, re-checked against the current filter.
 
     The filter runs at capture, so a snapshot taken by an older version, or the
     pinned pre-boot copy, can hold a line it would now reject; that line is
-    downgraded to the bare cd here, as it would be at capture. Only command and
-    ssh tabs replay recorded text: agent and shell restores are built from
+    downgraded to the bare cd here, as it would be at capture, and the note
+    that capture would have recorded is returned with it. Only command and ssh
+    tabs replay recorded text: agent and shell restores are built from
     validated parts.
     """
     restore = tab.get("restore") or ""
     if tab.get("kind") not in ("command", "ssh"):
-        return restore
+        return restore, None
     prefix = _cd(tab.get("cwd"))
     if restore == prefix:
-        return restore  # already the bare cd
+        return restore, None  # already the bare cd
     replayed = (
         restore[len(prefix) + 4 :] if prefix and restore.startswith(prefix + " && ") else restore
     )
-    return prefix if _has_shell_syntax(replayed) else restore
+    if _has_shell_syntax(replayed):
+        return prefix, not_replayed_note(replayed)
+    return restore, None
 
 
 HOME = Path.home()
@@ -182,10 +193,7 @@ def resolve_command(proc: procs.Proc, cwd: str | None) -> dict:
     kind = "ssh" if proc.argv0 == "ssh" else "command"
     if _has_shell_syntax(proc.command):
         result = _result(kind, None, cwd, "")
-        note = (
-            "command contains shell syntax and was not replayed; "
-            f"run it yourself if you trust it: {proc.command}"
-        )
+        note = not_replayed_note(proc.command)
         # Keep any cwd warning too rather than replacing it.
         result["warning"] = f"{result['warning']}; {note}" if result["warning"] else note
         return result
