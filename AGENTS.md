@@ -120,9 +120,13 @@ an issue.
   included: the macOS default shell expands `~`, `=cmd`, and `^`/`#` under
   `extendedglob`, which a bash-minded filter misses. Filter at capture AND
   when planning, so an old snapshot is held to the current rules.
-- Parse `ps` and `lsof` output on `\n` only, never `splitlines()`: `ps`
-  passes Unicode line separators in argv through, and splitting on them lets
-  any process, of any user, forge a process line on another tab's tty.
+- Parse `ps`, `lsof` and `osascript` output on `\n` only, never
+  `splitlines()`: `ps` passes Unicode line separators in argv through, and
+  splitting on them lets any process, of any user, forge a process line on
+  another tab's tty. Tab titles are program-controlled, so the AppleScript
+  cleans every separator out of them, `osascript` output is decoded from bytes
+  (text mode turns CR into a newline), and a malformed or repeated row fails
+  the listing.
 - Refuse `--go --force` unless restore finds its own tab among iTerm's: it is
   found through the tty, and with no terminal, or one iTerm does not own
   (tmux, ssh), only that tab being busy keeps restore out of it, which is
