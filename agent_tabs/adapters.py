@@ -49,8 +49,8 @@ def checked_restore(tab: dict) -> tuple[str, str | None]:
     pinned pre-boot copy, can hold a line it would now reject; that line is
     downgraded to the bare cd here, as it would be at capture, and the note
     that capture would have recorded is returned with it. Only command and ssh
-    tabs replay recorded text: agent and shell restores are built from
-    validated parts.
+    tabs replay recorded text; agent and shell restores were built at capture
+    from validated parts. A hand-edited snapshot is out of scope (SECURITY.md).
     """
     restore = tab.get("restore") or ""
     if tab.get("kind") not in ("command", "ssh"):
@@ -58,9 +58,11 @@ def checked_restore(tab: dict) -> tuple[str, str | None]:
     prefix = _cd(tab.get("cwd"))
     if restore == prefix:
         return restore, None  # already the bare cd
-    replayed = (
-        restore[len(prefix) + 4 :] if prefix and restore.startswith(prefix + " && ") else restore
-    )
+    if prefix and not restore.startswith(prefix + " && "):
+        # Capture always writes `cd <cwd> && <command>`; anything else was not
+        # written by it, so only the cd it should have had is typed.
+        return prefix, not_replayed_note(restore)
+    replayed = restore[len(prefix) + 4 :] if prefix else restore
     if _has_shell_syntax(replayed):
         return prefix, not_replayed_note(replayed)
     return restore, None
