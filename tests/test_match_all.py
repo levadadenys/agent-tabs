@@ -16,22 +16,42 @@ from agent_tabs import restore
 
 
 def snap(*windows):
-    return {"windows": [
-        {"window_index": i + 1, "tabs": [
-            {"tab_index": j + 1, "pane_index": 1, "title": t, "kind": "claude",
-             "restore": f"claude --resume {t}"}
-            for j, t in enumerate(titles)]}
-        for i, titles in enumerate(windows)]}
+    return {
+        "windows": [
+            {
+                "window_index": i + 1,
+                "tabs": [
+                    {
+                        "tab_index": j + 1,
+                        "pane_index": 1,
+                        "title": t,
+                        "kind": "claude",
+                        "restore": f"claude --resume {t}",
+                    }
+                    for j, t in enumerate(titles)
+                ],
+            }
+            for i, titles in enumerate(windows)
+        ]
+    }
 
 
 def live(*windows):
     rows = []
     for wi, titles in enumerate(windows, start=1):
         for ti, title in enumerate(titles, start=1):
-            rows.append({"window_index": wi, "window_id": f"w{wi}",
-                         "tab_index": ti, "pane_index": 1,
-                         "tty": f"/dev/ttys{wi}{ti}", "title": title,
-                         "kind": None, "busy": False})
+            rows.append(
+                {
+                    "window_index": wi,
+                    "window_id": f"w{wi}",
+                    "tab_index": ti,
+                    "pane_index": 1,
+                    "tty": f"/dev/ttys{wi}{ti}",
+                    "title": title,
+                    "kind": None,
+                    "busy": False,
+                }
+            )
     return rows
 
 
@@ -96,9 +116,7 @@ def test_the_stronger_match_claims_the_window():
     further back -- and the weak window then had the wrong sessions typed in.
     """
     s = snap(["p", "q", "r"])
-    pairs, _unmatched, notes = restore.match_all(
-        s, live(["p", "unrelated"], ["p", "q", "r"])
-    )
+    pairs, _unmatched, notes = restore.match_all(s, live(["p", "unrelated"], ["p", "q", "r"]))
     assert [(w, m["window_index"]) for w, m in pairs] == [(2, 1)], pairs
     assert any("already being restored" in n for n in notes)
 
@@ -121,9 +139,7 @@ def test_a_window_falls_back_to_its_next_best():
     # matches snapshot 1 harder (3 titles) and takes it, so live 1 must fall
     # back to snapshot 2 instead of being dropped.
     s = snap(["a", "b", "c"], ["d"])
-    pairs, unmatched, _ = restore.match_all(
-        s, live(["a", "b", "d"], ["a", "b", "c"])
-    )
+    pairs, unmatched, _ = restore.match_all(s, live(["a", "b", "d"], ["a", "b", "c"]))
     got = sorted((w, m["window_index"]) for w, m in pairs)
     assert got == [(1, 2), (2, 1)], got
     assert unmatched == []
@@ -135,9 +151,9 @@ def test_a_window_with_no_remaining_option_is_reported():
     s = snap(["a", "b", "c"])
     pairs, _, notes = restore.match_all(s, live(["a", "b", "c"], ["a"]))
     assert [(w, m["window_index"]) for w, m in pairs] == [(1, 1)], pairs
-    assert any(
-        "live window 2" in n and "already being restored elsewhere" in n for n in notes
-    ), notes
+    assert any("live window 2" in n and "already being restored elsewhere" in n for n in notes), (
+        notes
+    )
 
 
 def test_assignment_restores_both_when_greedy_would_strand_one():
@@ -148,9 +164,7 @@ def test_assignment_restores_both_when_greedy_would_strand_one():
     live 2. Assigning 1 -> 2 and 2 -> 1 restores both.
     """
     s = snap(["a", "b", "c"], ["d", "e"])
-    pairs, unmatched, _ = restore.match_all(
-        s, live(["a", "b", "c", "d", "e"], ["a", "b", "c"])
-    )
+    pairs, unmatched, _ = restore.match_all(s, live(["a", "b", "c", "d", "e"], ["a", "b", "c"]))
     got = sorted((w, m["window_index"]) for w, m in pairs)
     assert got == [(1, 2), (2, 1)], got
     assert unmatched == []
@@ -165,9 +179,7 @@ def test_a_strong_match_is_not_sacrificed_for_two_weak_ones():
     Live 1 keeps its match; live 2 is reported and left alone.
     """
     s = snap(["a", "b", "c", "d", "e"], ["f"])
-    pairs, unmatched, notes = restore.match_all(
-        s, live(["a", "b", "c", "d", "e", "f"], ["a"])
-    )
+    pairs, unmatched, notes = restore.match_all(s, live(["a", "b", "c", "d", "e", "f"], ["a"]))
     assert [(w, m["window_index"]) for w, m in pairs] == [(1, 1)], pairs
     assert [w["window_index"] for w in unmatched] == [2]
     assert any("live window 2" in n for n in notes), notes
@@ -209,9 +221,7 @@ def test_a_group_too_tangled_to_solve_is_reported_not_guessed():
 
 
 def test_grouping_keeps_independent_windows_apart():
-    groups = restore._groups(
-        [1, 2, 3], {1: {10: 3, 11: 2}, 2: {10: 3}, 3: {20: 1}}
-    )
+    groups = restore._groups([1, 2, 3], {1: {10: 3, 11: 2}, 2: {10: 3}, 3: {20: 1}})
     assert sorted(sorted(g) for g in groups) == [[1, 2], [3]], groups
 
 
@@ -223,9 +233,7 @@ def test_a_global_tie_is_reported_not_guessed():
     snapshot window's sessions into a window the evidence cannot tell apart.
     """
     s = snap(["a", "b"], ["c"])
-    pairs, unmatched, notes = restore.match_all(
-        s, live(["a", "b", "c", "p"], ["a", "b", "c", "q"])
-    )
+    pairs, unmatched, notes = restore.match_all(s, live(["a", "b", "c", "p"], ["a", "b", "c", "q"]))
     assert pairs == [], f"guessed a globally tied assignment: {pairs}"
     assert sum("fits equally well" in n for n in notes) == 2, notes
     assert sorted(w["window_index"] for w in unmatched) == [1, 2]
