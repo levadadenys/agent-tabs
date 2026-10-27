@@ -296,6 +296,14 @@ reboot. Run the dry run first and read it.
 python3 tests/run_all.py
 ```
 
+Lint and type checks, as CI runs them (the tools are pinned in
+`requirements-dev.txt`; agent-tabs itself needs none of them):
+
+```bash
+pip install -r requirements-dev.txt
+ruff check . && mypy && shellcheck .githooks/pre-push
+```
+
 No test framework and no dependencies. The tests drive real call sites where
 the mechanism is the point — the Codex account test spawns a real process
 holding a real rollout file and resolves it through a real `lsof`, and the
