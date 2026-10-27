@@ -12,8 +12,15 @@ You need macOS, iTerm2 and Python 3.9 or later; agent-tabs itself has no depende
 ```sh
 git clone https://github.com/levadadenys/agent-tabs && cd agent-tabs
 python3 tests/run_all.py                          # standard library only
-pip install -r requirements-dev.txt               # ruff and mypy, pinned
-brew install shellcheck                           # for the pre-push hook's check
+```
+
+The lint and type-check tools are pinned in `requirements-dev.txt` and need Python 3.10 or later
+(mypy no longer supports 3.9). Install them in a virtual environment:
+
+```sh
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements-dev.txt               # ruff and mypy
+brew install shellcheck
 ruff check . && ruff format --check . && mypy && shellcheck .githooks/pre-push
 ```
 
@@ -40,6 +47,7 @@ scan over the whole history on every pull request, so the hook only saves you a 
 | `agent_tabs/snapshot.py` | capture, history, and the guards that keep a shutdown from overwriting a good snapshot |
 | `agent_tabs/restore.py` | planning, pairing live windows with snapshot windows, and typing |
 | `agent_tabs/install.py` | the launchd recorder and the symlinks |
+| `agent_tabs/config.py` | `~/.agent-tabs/config.json`: the Codex account map |
 | `bin/agent-tabs` | the command line |
 
 ## Making a change
@@ -73,10 +81,12 @@ usual ways to find the id: a file named by pid (Claude), a transcript the proces
 (Codex, Grok). Things to get right:
 
 - the id must come from something the agent itself wrote, not from guessing by timestamps;
-- restore commands are always `cd <cwd> && <resume>`, because agents scope their session pickers
-  to the working directory;
+- restore commands are `cd <cwd> && <resume>`, because agents scope their session pickers to the
+  working directory;
 - anything taken from a process's argv is data any local process controls. Extract the id with a
   strict pattern; never interpolate free text into the command.
+
+Give it a one-letter mark in `KIND_MARK` in `bin/agent-tabs`, or `list` shows `?`.
 
 Being in `AGENT_RESOLVERS` is what makes a tab count as an agent everywhere else, including the
 guard that refuses to let an empty capture overwrite a good snapshot.
