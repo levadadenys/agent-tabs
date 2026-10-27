@@ -377,7 +377,9 @@ uninstall](#stop-or-uninstall): the launchd job, two symlinks and
 ## Roadmap
 
 - **More terminals:** Terminal.app, Ghostty, WezTerm, kitty, and tmux, which
-  would also bring Linux.
+  would also bring Linux. The design and the recommended order are in
+  [docs/specs/MULTI_TERMINAL.md](docs/specs/MULTI_TERMINAL.md); nothing is built
+  yet.
 - **Split panes** recreated, not only recorded.
 - **A real reboot** restored from, and the result recorded above.
 
