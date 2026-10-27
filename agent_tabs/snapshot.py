@@ -43,12 +43,13 @@ COLLAPSE_RATIO = 0.67
 # at the newest one holds at least COLLAPSE_STREAK captures AND spans at least
 # COLLAPSE_SETTLE_SECONDS. Each rule covers what the other cannot, at any
 # recorder interval:
-# - the count stops a gap supplying the time for free: a half-dead capture from
-#   a shutdown and the first small one after boot are two collapsed captures
-#   far more than 45 s apart. The pre-boot pin does not make that safe, since
-#   it is skipped when the boot time cannot be read;
-# - the span stops a burst supplying the count for free: several captures can
-#   land at once (a manual snapshot racing the launchd tick).
+# - the count means a gap alone is not enough: a half-dead capture from a
+#   shutdown and the first small one after boot are two collapsed captures far
+#   more than 45 s apart, and at least three must have seen the drop. The
+#   pre-boot pin is the backstop, not a guarantee: it is skipped when the boot
+#   time cannot be read;
+# - the span means a burst alone is not enough: several captures can land at
+#   once (a manual snapshot racing the launchd tick).
 # The whole run is walked, not a fixed window of COLLAPSE_STREAK archives: at a
 # 10 s interval three captures span 20 s, so a fixed window never accepted.
 COLLAPSE_STREAK = 3
@@ -290,15 +291,17 @@ def _last_good_count(exclude: Path | None = None) -> int | None:
     collapse guard off exactly when the state is already suspect. The capture
     being judged is excluded, or it would compare against itself.
     """
+    # An empty capture is never the last good one: a count of 0 would make the
+    # caller's `if previous` false and switch the collapse guard off.
     if LATEST.exists():
         count = _count_of(LATEST)
-        if count is not None:
+        if count:
             return count
     for archive in reversed(_history_by_time()):
         if exclude is not None and archive == exclude:
             continue
         count = _count_of(archive)
-        if count is not None:
+        if count:
             return count
     return None
 
