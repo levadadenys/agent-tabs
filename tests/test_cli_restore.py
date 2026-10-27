@@ -160,6 +160,12 @@ def test_go_force_without_a_terminal_types_nothing():
         rec = setup(Path(tmp), snap([("web", "s1")]), live(["web"]))
         assert cli.cmd_restore(args(force=True)) == 2
         assert rec.calls == [], f"typed with --force and no terminal: {rec.calls}"
+        # A terminal iTerm does not own (tmux, ssh) is no better: restore still
+        # cannot find its own tab.
+        restore.current_tty = lambda: "ttys555"  # type: ignore[assignment]
+        assert cli.cmd_restore(args(force=True)) == 2
+        assert rec.calls == [], f"typed with --force from a foreign terminal: {rec.calls}"
+        restore.current_tty = lambda: None  # type: ignore[assignment]
         # Not --force, and not --go: both are still allowed without a terminal.
         assert cli.cmd_restore(args(go=False, force=True)) == 0
         assert cli.cmd_restore(args()) == 0
@@ -169,9 +175,9 @@ def test_go_force_without_a_terminal_types_nothing():
 def test_force_is_passed_through_as_given():
     for force in (False, True):
         with tempfile.TemporaryDirectory() as tmp:
-            rec = setup(Path(tmp), snap([("web", "s1")]), live(["web"]))
-            # From a terminal: without one, --go --force is refused outright.
-            restore.current_tty = lambda: "ttys099"  # type: ignore[assignment]
+            rec = setup(Path(tmp), snap([("web", "s1")]), live(["web"], ["launcher"]))
+            # From an iTerm tab (window 2's): without one, --go --force is refused.
+            restore.current_tty = lambda: "ttys21"  # type: ignore[assignment]
             assert cli.cmd_restore(args(force=force)) == 0
             assert [f for _, f, _ in rec.calls] == [force], rec.calls
 
