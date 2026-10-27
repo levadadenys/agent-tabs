@@ -28,8 +28,8 @@ a crash or reboot.
   restore (#5).
 - A dry run unless `--go`. Never types into a tab holding live work or the tab it runs from, never
   starts a session that is already running anywhere, and never replays a command line containing
-  shell syntax. Busy tabs and running sessions are re-checked immediately before typing
-  (#4, #5).
+  shell syntax, zsh's included; `--go --force` is refused without a terminal. Busy tabs and
+  running sessions are re-checked immediately before typing (#4, #5).
 
 ### Project
 - Contributor guide, a pre-push hook that refuses home paths and personal emails (gitleaks), and
