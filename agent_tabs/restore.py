@@ -5,10 +5,11 @@ from __future__ import annotations
 import fcntl
 import os
 from contextlib import contextmanager
-from functools import lru_cache
 from dataclasses import dataclass
+from functools import cache
 
-from . import adapters, iterm, procs, snapshot as snap_mod
+from . import adapters, iterm, procs
+from . import snapshot as snap_mod
 
 # Anything that is not an idle shell counts as live work. Listing only the
 # agent CLIs here meant a tab that had since been given to vim, psql or an ssh
@@ -236,7 +237,7 @@ def _solve(
     forced or merely one of several equally good ones.
     """
 
-    @lru_cache(maxsize=None)
+    @cache
     def best(i: int, used: int) -> tuple[int, int, tuple] | None:
         if i == len(order):
             return (0, 0, ())
