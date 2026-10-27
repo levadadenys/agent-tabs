@@ -144,6 +144,29 @@ def test_an_existing_world_readable_directory_gets_hardened():
         assert (state / "history").stat().st_mode & 0o777 == 0o700
 
 
+def test_a_capture_with_no_agents_hardens_the_state_dir_too():
+    # Such a capture is archived but never promoted, and only promotion used to
+    # harden STATE_DIR. Creating history/ makes STATE_DIR with the umask, so a
+    # recorder that only ever saw idle tabs left it world-readable.
+    previous = os.umask(0o022)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            created = Path(tmp) / "created"
+            m = fresh_module(created)
+            m.save(snap_with(0))
+            mode = created.stat().st_mode & 0o777
+            assert mode == 0o700, f"state dir created by a capture is {oct(mode)}"
+
+            existing = Path(tmp) / "existing"
+            existing.mkdir(mode=0o755)
+            m = fresh_module(existing)
+            m.save(snap_with(0))
+            mode = existing.stat().st_mode & 0o777
+            assert mode == 0o700, f"existing state dir left at {oct(mode)}"
+    finally:
+        os.umask(previous)
+
+
 def test_snapshot_files_are_owner_only():
     with tempfile.TemporaryDirectory() as tmp:
         m = fresh_module(Path(tmp) / "state")
