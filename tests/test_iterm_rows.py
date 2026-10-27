@@ -17,7 +17,19 @@ from runner import run
 from agent_tabs import iterm
 
 REAL_OSASCRIPT = iterm._osascript
-SEPARATORS = "\n\r\u2028\u2029\x85\x0b\x0c\x1c\x1d\x1e\x1f"
+SEPARATORS = "\n\r\u2028\u2029\x85\x0b\x0c\x1c\x1d\x1e\x1f\x00\x7f\x9f"
+# A combining mark or variation selector after a separator makes one grapheme
+# cluster of the two; a cleaner that matches graphemes misses the separator.
+MARKS = ("", "\u0301", "\ufe0f")
+
+
+def cleaned(title):
+    """Run a title through the listing's real AppleScript cleaner."""
+    expr = " & ".join(f"(character id {ord(c)})" for c in title) or '""'
+    script = iterm.CLEAN_HANDLER + f"return clean({expr})"
+    out = subprocess.run(["osascript", "-e", script], capture_output=True)
+    assert out.returncode == 0, f"setup: osascript failed: {out.stderr!r}"
+    return out.stdout.decode().removesuffix("\n")
 
 
 def row(window_id="80", tab=1, pane=1, tty="/dev/ttys001", title="a title"):
@@ -29,19 +41,30 @@ def listing(text):
 
 
 def test_the_title_cleaner_removes_every_separator():
-    pieces = []
-    for i, ch in enumerate(SEPARATORS):
-        pieces += [f'"x{i}"', f"(character id {ord(ch)})"]
-    script = iterm.CLEAN_HANDLER + "return clean(" + " & ".join(pieces) + ")"
-    out = subprocess.run(["osascript", "-e", script], capture_output=True).stdout.decode()
-    cleaned = out.removesuffix("\n")
-    assert cleaned.startswith("x0 "), f"setup: unexpected osascript output {out!r}"
-    left = [hex(ord(c)) for c in cleaned if c in SEPARATORS]
-    assert not left, f"separators survived the cleaner: {left}"
+    for sep in SEPARATORS:
+        for mark in MARKS:
+            got = cleaned(f"a{sep}{mark}b")
+            assert got.startswith("a") and got.endswith("b"), f"setup: {got!r}"
+            left = [hex(ord(c)) for c in got if c in SEPARATORS]
+            assert not left, f"{hex(ord(sep))}+{mark!r} left {left} in {got!r}"
+    assert cleaned("") == "" and cleaned("plain — ✓") == "plain — ✓"
+
+
+def test_a_cleaned_title_parses_as_one_row():
+    # End to end: the real cleaner's output, inside a row, through the parser.
+    forged = row(tab=2, tty="/dev/ttys009", title="idle")
+    for sep in SEPARATORS:
+        for mark in MARKS:
+            title = cleaned(f"x{sep}{mark}{forged}")
+            listing(row(title=title) + "\n")
+            rows = iterm._enumerate_once()
+            assert len(rows) == 1, f"{hex(ord(sep))}+{mark!r} produced {len(rows)} rows"
 
 
 def test_the_listing_cleans_every_title():
-    # The script is only safe if the title it emits is the cleaned one.
+    # The script is only safe if the title it emits is the cleaned one. Running
+    # ENUMERATE needs a live iTerm, so the wiring is checked on its text; the
+    # cleaner itself is exercised for real above.
     assert "(my clean(name of s))" in iterm.ENUMERATE
     assert iterm.ENUMERATE.count("name of s") == 1, "a title is emitted uncleaned"
 
@@ -73,6 +96,7 @@ def test_a_malformed_or_repeated_row_fails_the_listing():
         row() + "\n" + row(title="again") + "\n",  # the same pane twice
         row() + "\n" + "1\x1f80\x1f2\n",  # too few fields
         row(tab="two") + "\n",  # not a number
+        row() + "\n" + "\x1f" * 5 + "\n",  # only separators: str.strip() calls them blank
     ):
         listing(bad)
         try:
