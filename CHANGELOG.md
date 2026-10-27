@@ -19,6 +19,10 @@ a crash or reboot.
 - Codex sessions resume under the account they ran as, derived from the rollout file's path
   (`codex_profiles` in `~/.agent-tabs/config.json`).
 
+- `interval_seconds` in `config.json` sets the capture interval, 10–300 s (default 30), applied by
+  re-running `install`. History is kept by age (the last half hour, never fewer than 60 captures),
+  so it means the same at any interval. A damaged `config.json` never breaks install or a capture.
+
 ### Restoring
 - `restore` refills the window it runs in; `restore N --new-window` rebuilds one snapshot window.
 - `restore --all` pairs every live window with the snapshot window it came from, by tab title, as
