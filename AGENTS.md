@@ -34,7 +34,8 @@ into live shells, so a wrong result is not a cosmetic bug.
 `python3 tests/run_all.py` must pass. No test framework, no dependencies.
 
 CI (`.github/workflows/ci.yml`) runs the suite on macOS for Python 3.9–3.14,
-plus `ruff check .`, `mypy` and `shellcheck .githooks/pre-push`. The lint
+plus `ruff check .`, `ruff format --check .`, `mypy` and
+`shellcheck .githooks/pre-push`. Run `ruff format .` before committing. The lint
 tools are pinned in `requirements-dev.txt`; they are development tools, not
 dependencies of agent-tabs.
 
