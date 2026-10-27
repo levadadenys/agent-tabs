@@ -42,9 +42,13 @@ def _holder(path: Path) -> subprocess.Popen:
 
 
 def _resolve(home: Path, profiles: dict) -> dict:
+    return _resolve_raw(home, json.dumps({"codex_profiles": profiles}).encode())
+
+
+def _resolve_raw(home: Path, raw: bytes) -> dict:
     with tempfile.TemporaryDirectory() as state:
         cfg = Path(state) / "config.json"
-        cfg.write_text(json.dumps({"codex_profiles": profiles}))
+        cfg.write_bytes(raw)
         original = config.CONFIG_PATH
         config.CONFIG_PATH = cfg
         holder = _holder(_rollout(home))
@@ -71,6 +75,25 @@ def test_default_account_resumes_with_plain_codex():
         # A profile map that does not mention this home must not match it.
         result = _resolve(home, {"/somewhere/else": "codex other"})
     assert result["restore"] == f"cd /work && codex resume {UUID}", result["restore"]
+
+
+def test_a_damaged_config_never_breaks_a_codex_capture():
+    # codex_command runs for every Codex tab during a capture, so a malformed
+    # config must give plain codex, never an exception that loses the capture.
+    with tempfile.TemporaryDirectory() as tmp:
+        home = (Path(tmp).resolve()) / ".codex"
+        for raw in (
+            b"\xff\xfe not utf-8",
+            b"5",
+            b"null",
+            b"[1, 2]",
+            b'{"codex_profiles": []}',
+            b'{"codex_profiles": [1]}',
+            b'{"codex_profiles": "abc"}',
+            json.dumps({"codex_profiles": {str(home): 5}}).encode(),
+        ):
+            result = _resolve_raw(home, raw)
+            assert result["restore"] == f"cd /work && codex resume {UUID}", (raw, result)
 
 
 if __name__ == "__main__":
