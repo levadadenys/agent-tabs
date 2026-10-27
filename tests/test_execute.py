@@ -28,9 +28,14 @@ class FakeITerm:
 
     def enumerate_tabs(self):
         return [
-            {"window_index": self.window, "window_id": self.window_id,
-             "tab_index": i + 1, "pane_index": 1,
-             "tty": f"/dev/ttys10{i}", "title": f"t{i}"}
+            {
+                "window_index": self.window,
+                "window_id": self.window_id,
+                "tab_index": i + 1,
+                "pane_index": 1,
+                "tty": f"/dev/ttys10{i}",
+                "title": f"t{i}",
+            }
             for i in range(self.tabs)
         ]
 
@@ -47,13 +52,16 @@ def install(fake, busy_tabs=(), own_tty=None, running=None):
     # execute() re-checks running sessions before typing; stub it so these
     # tests never reach the real ps / lsof / AppleScript.
     restore.running_sessions = lambda: dict(running or {})  # type: ignore[assignment]
-    iterm.enumerate_tabs = fake.enumerate_tabs          # type: ignore[assignment]
-    iterm.run_in_tab = fake.run_in_tab                  # type: ignore[assignment]
-    iterm.create_tab = fake.create_tab                  # type: ignore[assignment]
-    restore.current_tty = lambda: own_tty               # type: ignore[assignment]
-    restore.live_tabs = lambda: [                       # type: ignore[assignment]
-        {**t, "kind": "vim" if t["tab_index"] in busy_tabs else None,
-         "busy": t["tab_index"] in busy_tabs}
+    iterm.enumerate_tabs = fake.enumerate_tabs  # type: ignore[assignment]
+    iterm.run_in_tab = fake.run_in_tab  # type: ignore[assignment]
+    iterm.create_tab = fake.create_tab  # type: ignore[assignment]
+    restore.current_tty = lambda: own_tty  # type: ignore[assignment]
+    restore.live_tabs = lambda: [  # type: ignore[assignment]
+        {
+            **t,
+            "kind": "vim" if t["tab_index"] in busy_tabs else None,
+            "busy": t["tab_index"] in busy_tabs,
+        }
         for t in fake.enumerate_tabs()
     ]
 
@@ -190,6 +198,7 @@ def test_no_blank_tab_is_created_for_a_session_started_since_the_plan():
 
 def test_an_unusable_state_dir_is_a_message_not_a_traceback():
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp:
         blocker = Path(tmp) / "file"
         blocker.write_text("")
@@ -206,6 +215,7 @@ def test_an_unusable_state_dir_is_a_message_not_a_traceback():
 
 def test_two_restores_cannot_run_at_once():
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp:
         original = snap_mod.STATE_DIR
         snap_mod.STATE_DIR = Path(tmp)
