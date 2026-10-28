@@ -56,15 +56,18 @@ seeing the plan.
    closed). One that a window with something running might be is reported
    with the commands for either case: tell the user rather than guess.
 
-3. Show the user the plan and ask before executing. Then run exactly the same
-   command with `--go`:
+3. Show the user the plan and wait for an explicit yes in their reply. Then
+   run exactly the step 2 command, **including any `-f …`**, with `--go`
+   appended:
 
    ```bash
-   agent-tabs restore --all --create-missing --go
+   agent-tabs restore --all --create-missing --go          # no warning in step 1
+   agent-tabs restore --all --create-missing -f ~/.agent-tabs/pre-boot.json --go   # after one
    ```
 
-   If it stops part-way, run the same command again: anything already running
-   is skipped.
+   If it stops part-way or errors, do not retry `--go` yourself: a new run
+   plans afresh. Show the user the output, run the dry run again, and ask
+   again. Never loop.
 
 ## Reading the plan
 
@@ -72,20 +75,23 @@ seeing the plan.
   restoring it would start a duplicate. Expected, nothing to do.
 - `SKIP (same session as tab N of snapshot window W, started once)` — the
   snapshot lists that session twice; it is restored once.
-- `SKIP (already running …)` — the target tab is busy. `--force` types into it
-  anyway; it never starts a duplicate session.
+- `SKIP (already running …)` — the target tab is busy. Leave it; do not use
+  `--force`, even where the plan suggests it.
 - A restored tab says `No conversation found with session ID` — Claude Code
   deleted that transcript: it removes conversations not modified for
   `cleanupPeriodDays` (30 by default). Nothing can resume it; tell the user,
   and suggest `"cleanupPeriodDays": 365` in `~/.claude/settings.json`.
 - `Not restored:` — windows it declined to guess about (ambiguous, too many
-  windows sharing titles, no live match, one a live window might be, or the
-  window it ran from), each with the command that restores it. Rerunning from a new window is safe: anything
-  already running is skipped.
+  windows sharing titles, no live match, or one a live window might be), each
+  with the command that restores it. Those commands include `--go`: never run
+  one without the same explicit yes. Notes about "the window you ran it from"
+  do not apply to you: without a terminal, restore cannot see your window.
 
-For a single window, run from inside it: `agent-tabs restore` (auto-matched) or
-`agent-tabs restore <n>`. To rebuild one snapshot window from scratch:
-`agent-tabs restore <n> --new-window`.
+Without a terminal you cannot run `agent-tabs restore` or
+`agent-tabs restore <n>`, which fill the window they run in: they stop with
+"Not running inside an iTerm tab". To rebuild one snapshot window, use
+`agent-tabs restore <n> --new-window`, dry run first. The user can run the
+other forms from a tab of that window.
 
 ## If there is no snapshot
 
