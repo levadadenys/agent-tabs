@@ -37,7 +37,9 @@ def snap(*windows):
     }
 
 
-def live(*windows):
+def live(*windows, running=()):
+    """Live windows by tab title; `running` names windows where something runs,
+    which keeps a window that might be a snapshot window from being rebuilt."""
     return [
         {
             "window_index": wi,
@@ -47,7 +49,7 @@ def live(*windows):
             "tty": f"/dev/ttys{wi}{ti}",
             "title": t,
             "kind": None,
-            "busy": False,
+            "busy": wi in running,
         }
         for wi, titles in enumerate(windows, start=1)
         for ti, t in enumerate(titles, start=1)
@@ -82,7 +84,7 @@ def test_a_stray_window_never_takes_the_launchers_window():
     sharing one title with it took its snapshot window -- 4 sessions typed into
     an unrelated window, and a re-run then skipped them as running."""
     s = snap(["alpha", "beta", "gamma", "delta"])
-    l = live(["alpha", "beta", "gamma", "delta"], ["alpha", "other"])
+    l = live(["alpha", "beta", "gamma", "delta"], ["alpha", "other"], running={2})
     for create_missing in (False, True):
         pairs, create, reported, notes = decide(s, l, launcher=1, create_missing=create_missing)
         assert pairs == [], f"snapshot window 1 went to a stray window: {pairs}"
@@ -97,7 +99,7 @@ def test_the_launcher_never_settles_another_windows_tie():
     """Delta review: let into the matching, a launcher sharing one title with
     snapshot 1 resolved window 2's tie between 1 and 2 -- a guess, typed in."""
     s = snap(["a", "b", "c", "x"], ["a", "b", "c", "y"])
-    l = live(["x"], ["a", "b", "c"])
+    l = live(["x"], ["a", "b", "c"], running={2})
     for create_missing in (False, True):
         pairs, create, _, notes = decide(s, l, launcher=1, create_missing=create_missing)
         assert pairs == [], f"paired by the launcher's coincidence: {pairs}"
@@ -110,7 +112,7 @@ def test_the_launcher_note_matches_what_happens_to_its_window():
     window is refused, so it could claim "rebuilt below" for a window that is
     not rebuilt."""
     s = snap(["p", "q"], ["t", "z"])
-    l = live(["p", "q"], ["p"])
+    l = live(["p", "q"], ["p"], running={2})
     for create_missing in (False, True):
         _, create, _, notes = decide(s, l, launcher=1, create_missing=create_missing)
         assert 1 not in create, create
@@ -197,7 +199,7 @@ def test_an_ambiguous_window_is_reported_not_rebuilt():
     # and leave the window that may be the real one idle.
     s = snap(["notes", "a"], ["notes", "b"], ["solo"])
     _pairs, create, reported, notes = decide(
-        s, live(["-zsh"], ["notes"]), launcher=1, create_missing=True
+        s, live(["-zsh"], ["notes"], running={2}), launcher=1, create_missing=True
     )
     assert create == [3], (create, notes)
     assert sum("not restored" in n for n in notes) == 2, notes
@@ -209,7 +211,7 @@ def test_without_create_missing_a_window_a_live_window_might_be_is_not_offered_a
     """Sonnet review: plain --all listed these as "no live window matched --
     rebuild it", which is false and would duplicate the live window."""
     s = snap(["notes", "a"], ["notes", "b"], ["solo"])
-    _, _, reported, notes = decide(s, live(["-zsh"], ["notes"]), launcher=1)
+    _, _, reported, notes = decide(s, live(["-zsh"], ["notes"], running={2}), launcher=1)
     assert reported == [3], reported
     assert sum("not restored" in n and "might be it" in n for n in notes) == 2, notes
 
@@ -236,7 +238,7 @@ def test_would_create_matches_what_create_missing_actually_does():
     unmatched window, while it deliberately refuses ones a live window might
     be. The hint now names would_create, so it must equal the real outcome."""
     s = snap(["notes", "a"], ["notes", "b"], ["solo"], ["other"])
-    l = live(["-zsh"], ["notes"])
+    l = live(["-zsh"], ["notes"], running={2})
     _, _, reported, _, would = restore.decide_restore_all(s, l, 1, False)
     _, create, _, _, would_again = restore.decide_restore_all(s, l, 1, True)
     assert would == [w["window_index"] for w in create] == would_again == [3, 4], (
@@ -250,7 +252,9 @@ def test_would_create_matches_what_create_missing_actually_does():
 def test_a_refused_window_gets_commands_that_work():
     # "restore N" alone, run from the wrong window, part-restores again.
     s = snap(["notes", "a"], ["notes", "b"])
-    _, _, _, notes, _ = restore.decide_restore_all(s, live(["-zsh"], ["notes"]), 1, True)
+    _, _, _, notes, _ = restore.decide_restore_all(
+        s, live(["-zsh"], ["notes"], running={2}), 1, True
+    )
     refusal = next(n for n in notes if "not restored" in n)
     assert "from a new tab in that window" in refusal, refusal
     assert "--new-window --go" in refusal, refusal
