@@ -4,7 +4,7 @@
 <circle cx="18" cy="17" r="6" fill="#ff5f57"/><circle cx="38" cy="17" r="6" fill="#febc2e"/><circle cx="58" cy="17" r="6" fill="#28c840"/>
 <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" xml:space="preserve" style="white-space:pre">
 <text x="20" y="67" fill="#7ee787" font-weight="600">$ agent-tabs restore --all --create-missing</text>
-<text x="20" y="86" fill="#8b919c">Snapshot captured 2026-10-28T07:55:24+00:00  (3m ago)</text>
+<text x="20" y="86" fill="#8b919c">Snapshot captured 2026-10-28T07:58:34+00:00  (3m ago)</text>
 <text x="20" y="105" fill="#d7dae0"></text>
 <text x="20" y="124" fill="#79c0ff" font-weight="600">snapshot window 1 -&gt; a new window  (4 to start)</text>
 <text x="20" y="143" fill="#d7dae0">  tab  1  cd /Users/you/code/storefront &amp;&amp; claude --resume 86397246-17a8-55a2-9886-e56d684b0f01</text>
