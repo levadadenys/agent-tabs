@@ -37,15 +37,18 @@ seeing the plan.
    being typed in:
 
    ```bash
-   agent-tabs restore --all                    # iTerm restored the windows
-   agent-tabs restore --all --create-missing   # iTerm restored none, or only some
+   agent-tabs restore --all --create-missing   # after a reboot
+   agent-tabs restore --all                    # windows survived (agents killed, iTerm open)
    ```
 
-   `--all` pairs each live window with the snapshot window it came from, by tab
-   title — iTerm restores titles when *Reopen windows when logging back in* was
-   ticked at shutdown. Titles that are only a shell name (`-zsh`) do not count.
-   `--create-missing` also rebuilds, in new windows, the snapshot windows
-   nothing matched — but not one that an unpaired live window might be.
+   After a reboot, windows iTerm reopened come back as plain shells titled
+   only with the shell's name (`-zsh`), which is no evidence of which window
+   was which: they are not paired, and `--create-missing` rebuilds their
+   snapshot windows beside them. Suggest closing the reopened ones, and
+   unticking *Reopen windows when logging back in* next time. `--all` pairs a
+   live window with the snapshot window it came from only by tab titles still
+   there; `--create-missing` never rebuilds a window an unpaired live window
+   might be.
 
 3. Read the plan, then execute:
 

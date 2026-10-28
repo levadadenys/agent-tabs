@@ -108,31 +108,36 @@ The first line shows when the snapshot was taken. It should be from just before
 the crash or reboot. If it says hours or days, the recorder was not running —
 see [Troubleshooting](#troubleshooting) before restoring.
 
-Then it depends on whether iTerm brought your windows back.
-
-**iTerm restored your windows** (tick *Reopen windows when logging back in* when
-you shut down, and it will):
-
-```bash
-agent-tabs restore --all        # dry run: the plan for every window
-agent-tabs restore --all --go   # start the sessions
-```
-
-Each live window is paired with the snapshot window it came from, by tab title.
-Run it from a new window: the window you run it from is never paired, because
-one of its tabs is the one you are typing in.
-
-**iTerm opened no windows**, or only some:
+**After a reboot**, untick *Reopen windows when logging back in* in the Restart
+dialog. iTerm then opens nothing, and one command rebuilds every window:
 
 ```bash
 agent-tabs restore --all --create-missing        # dry run
 agent-tabs restore --all --create-missing --go   # rebuild them
 ```
 
-`--create-missing` rebuilds, in a new window, every snapshot window that no live
-window matched. Windows that did come back are still restored in place. A
-snapshot window that some unpaired live window *might* be is reported rather
-than rebuilt — restore it explicitly once you have checked.
+If iTerm did reopen windows, they come back as plain shells: every tab is
+titled with the shell's name (`-zsh`), which is no evidence of which window was
+which. They are left alone, and `--create-missing` rebuilds their snapshot
+windows beside them. Close the reopened ones, before or after: nothing runs in
+them. If `list` says the snapshot was captured after the reboot, add the
+`-f ~/.agent-tabs/pre-boot.json` it prints, so the restore uses the sessions
+from before the reboot.
+
+**When windows survived** (agents killed, iTerm still open), `--all` pairs each
+live window with the snapshot window it came from, by the tab titles still
+there, and fills it in place:
+
+```bash
+agent-tabs restore --all        # dry run: the plan for every window
+agent-tabs restore --all --go   # start the sessions
+```
+
+Run it from a new window: the window you run it from is never paired, because
+one of its tabs is the one you are typing in. Windows that match nothing are
+listed, with the command that rebuilds each. A snapshot window that some
+unpaired live window *might* be is reported rather than rebuilt: restore it
+explicitly once you have checked.
 
 **Restore before starting new sessions.** Everything is a dry run until you add
 `--go`, and a session that is already running anywhere is never started twice,
@@ -277,6 +282,12 @@ unpaired live window might be.
 **"Cannot take the restore lock."** `~/.agent-tabs` (or `AGENT_TABS_HOME`) is not
 writable. Nothing was typed; fix the permissions and run it again.
 
+**A restored tab says "No conversation found with session ID".** When Claude
+Code starts, it deletes conversations not modified for `cleanupPeriodDays` (30
+by default). A tab left idle that long can lose its conversation while it sits
+open, and then nothing can resume it. To keep long-lived tabs resumable, set
+`"cleanupPeriodDays": 365` in `~/.claude/settings.json`.
+
 **A tab says "session already running in …".** It is: restoring it would start a
 duplicate. Nothing to do. "Same session as tab N of snapshot window W, started
 once" means the snapshot listed that session twice; it is restored once.
@@ -334,13 +345,18 @@ never fewer than 60 captures, so at a long interval it reaches further back (at
 ## What has been exercised for real
 
 - A genuine crash has been restored from, window by window.
-- `restore --all`, `--create-missing` and the pre-reboot copy are covered by
-  the test suite and by dry runs against 30+ live sessions (macOS
-  26.3, iTerm2 3.6.9), but **not yet through a real reboot**.
+- **A real reboot** (October 2026; macOS 26.3, iTerm2 3.6.9; 30 agent sessions
+  in 5 windows). The pre-reboot copy held all 30. One
+  `restore --all --create-missing -f ~/.agent-tabs/pre-boot.json --go` started
+  31 tabs across 5 windows, and 28 of the 30 sessions resumed. The other 2
+  could not be: Claude Code had deleted their transcripts after 30 idle days
+  (see [Troubleshooting](#troubleshooting)).
+- That run came after the reboot exposed a bug. Reading iTerm's window list by
+  position raced with the windows a restore creates and focuses, and every
+  earlier attempt stopped part-way. The list is now read by window id.
 - The recorder has run unattended under launchd since September 2026.
 
-Until the reboot path has been exercised for real, run the dry run first and
-read it. That is good advice regardless.
+Run the dry run first and read it.
 
 ## FAQ
 
