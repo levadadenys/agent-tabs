@@ -23,8 +23,10 @@ new iTerm window and run `agent-tabs restore --all --create-missing` to see the
 plan, then again with `--go` to carry it out.
 
 <p align="center"><img src="docs/demo/restore.svg" width="760" alt="agent-tabs restore --all --create-missing, a dry run after a reboot: for each of three lost windows, the command each tab would get: cd into its project and resume its Claude or Codex session, an ssh tab replayed, a plain shell given its directory back"></p>
-<p align="center"><sub>A dry run after a reboot, with made-up projects. The plan is printed by the real code
-(<a href="docs/demo/make_demo.py">docs/demo/make_demo.py</a>); nothing is typed until <code>--go</code>.</sub></p>
+<p align="center"><sub>A dry run after a reboot, with made-up projects: the plan is printed by the real
+code, with iTerm's live state stubbed (<a href="docs/demo/make_demo.py">docs/demo/make_demo.py</a>).
+Nothing is typed until <code>--go</code>.</sub></p>
+
 ## Why
 
 Claude, Codex and Grok keep their transcripts on disk, so a crash never loses a
