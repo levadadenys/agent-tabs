@@ -11,7 +11,8 @@ shares none of its code:
 - score(live, snapshot) = distinct non-blank titles they share, not counting
   titles that are only a shell name, plus tab positions whose working
   directories are equal (a trailing slash aside), not counting the home
-  directory or / (directories
+  directory or /, and counted only when at least 2 tabs agree or every tab of
+  two same-size windows does (directories
   carry over a reboot, where iTerm resets every title to the shell's name);
 - an assignment is one-to-one over pairs with score >= 1, windows may be left
   unassigned;
@@ -60,7 +61,10 @@ def same_dirs(a, b):
         d = (d or "").rstrip("/")
         return d if d and d not in {n.rstrip("/") for n in NOWHERE} else None
 
-    return sum(1 for (_, x), (_, y) in zip(a, b) if real(x) and real(x) == real(y))
+    hits = sum(1 for (_, x), (_, y) in zip(a, b) if real(x) and real(x) == real(y))
+    # One matching tab is too weak on its own, unless the windows are the same
+    # size and every tab matches.
+    return hits if hits >= 2 or (len(a) == len(b) and hits == len(a)) else 0
 
 
 def oracle(snapshot_windows, live_windows):
