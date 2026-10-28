@@ -3,7 +3,7 @@
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0] — 2026-10-28
 
 The first release: recording which agent session runs in which iTerm tab, and replaying it after
 a crash or reboot.
@@ -19,7 +19,6 @@ a crash or reboot.
   before restoring does not lose the pre-reboot fleet (#5).
 - Codex sessions resume under the account they ran as, derived from the rollout file's path
   (`codex_profiles` in `~/.agent-tabs/config.json`).
-
 - `interval_seconds` in `config.json` sets the capture interval, 10–300 s (default 30), applied by
   re-running `install`. History is kept by age (the last half hour, never fewer than 60 captures),
   so it means the same at any interval. A damaged `config.json` never breaks install or a capture.
@@ -49,6 +48,9 @@ a crash or reboot.
 ### Project
 - Contributor guide, a pre-push hook that refuses home paths and personal emails (gitleaks), and
   a PR template (#1).
-- MIT license (#7). CI on macOS for Python 3.9–3.14, with ruff, mypy, shellcheck and a
-  full-history gitleaks scan (#8); the code base formatted with ruff (#9).
+- MIT license (#7). CI with ruff, mypy, shellcheck and a full-history gitleaks scan on every
+  change, and the suite on macOS for Python 3.9 and 3.14 when code changes (#8, #14); the code base
+  formatted with ruff (#9).
 - CONTRIBUTING, SECURITY, this changelog, issue forms and Dependabot.
+
+[0.1.0]: https://github.com/levadadenys/agent-tabs/releases/tag/v0.1.0
