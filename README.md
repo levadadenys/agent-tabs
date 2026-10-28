@@ -211,7 +211,7 @@ A wrong pairing would type one window's sessions into another, so each live
 window is paired with the snapshot window it resembles most, one to one, and
 only when the evidence leaves no other choice. The evidence is the tab titles
 they share, plus the tabs, position by position, that sit in the same
-directory. Ties are reported, never guessed; a title that is only a shell name
+directory: at least two of them, or every tab of two windows the same size. Ties are reported, never guessed; a title that is only a shell name
 (`-zsh`) and the home directory do not count; the window you run it from is
 never paired. Anything not paired is listed with the
 command that restores it. The full rules are in
@@ -324,8 +324,9 @@ never fewer than 60 captures, so at a long interval it reaches further back (at
 - A deleted git worktree must be recreated at its old path before a session that
   ran inside it can be resumed.
 - Pairing is by tab titles and tab directories. Shell-name titles and the home
-  directory are ignored, but any other shared title, or a tab in the same
-  project directory at the same position, counts. So an unrelated window that
+  directory are ignored, and one matching directory counts only for a window
+  of one tab. But any other shared title, or two tabs in the same project
+  directories at the same positions, counts. So an unrelated window that
   happens to match can still pair when nothing else competes. The dry run shows
   every pairing before anything is typed.
 - Only agent sessions with an id are deduplicated. An ssh tab or another
