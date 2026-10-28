@@ -63,7 +63,13 @@ def live_tabs() -> list[dict]:
     reopens keep each tab's directory but not its title.
     """
     tabs = iterm.enumerate_tabs()
-    grouped = procs.by_tty(procs.process_table())
+    table = procs.process_table()
+    # Every iTerm tab runs at least a shell, so an empty table while tabs
+    # exist means ps failed, not that nothing runs. Reading it as "all idle"
+    # would let restore type into live work.
+    if tabs and not table:
+        raise iterm.ITermError("could not read the process list (ps); refusing to guess")
+    grouped = procs.by_tty(table)
     found = []
     for tab in tabs:
         proc = procs.foreground_proc(
@@ -141,6 +147,13 @@ def identifying_dirs(tabs) -> dict[int, str]:
     return {i: d for i, d in found.items() if d}
 
 
+# One tab in a project directory is weak evidence: a fresh window opened there
+# would claim any snapshot window whose first tab worked there too, and its
+# other tabs would be filled. Directories count when at least this many tabs
+# agree, or when every tab of two windows of the same size does.
+MIN_DIR_MATCHES = 2
+
+
 def evidence(snapshot_tabs, live_tabs) -> int:
     """How strongly a live window resembles a snapshot window.
 
@@ -152,6 +165,10 @@ def evidence(snapshot_tabs, live_tabs) -> int:
     titles = len(identifying_titles(snapshot_tabs) & identifying_titles(live_tabs))
     theirs, ours = identifying_dirs(snapshot_tabs), identifying_dirs(live_tabs)
     dirs = sum(1 for i, d in ours.items() if theirs.get(i) == d)
+    same_size = {t["tab_index"] for t in snapshot_tabs} == {t["tab_index"] for t in live_tabs}
+    whole = same_size and dirs == len({t["tab_index"] for t in live_tabs})
+    if dirs < MIN_DIR_MATCHES and not whole:
+        dirs = 0
     return titles + dirs
 
 
@@ -216,7 +233,10 @@ def select_window(snap: dict, number: int | None, live: list[dict]) -> tuple[dic
     if here is not None:
         matched = match_window(snap, live, here)
         if matched:
-            return matched, f"auto-matched snapshot window {matched['window_index']} by tab titles"
+            return matched, (
+                f"auto-matched snapshot window {matched['window_index']} "
+                "by tab titles and directories"
+            )
     raise ValueError(
         "Could not auto-match this window. Run `agent-tabs list` and pass a window number."
     )
