@@ -32,7 +32,7 @@ from agent_tabs import snapshot as snap_mod  # noqa: E402
 
 HOME = "/Users/you/code"
 # (title, kind, project directory, command for non-agent tabs)
-WINDOWS = [
+WINDOWS: list[list[tuple[str, str, str, str | None]]] = [
     [
         ("Checkout flow refactor", "claude", "storefront", None),
         ("Payment webhooks", "claude", "storefront", None),
@@ -49,7 +49,7 @@ WINDOWS = [
         ("Alert rules cleanup", "claude", "infra", None),
     ],
 ]
-RESUME = {"claude": "claude --resume {}", "codex": "codex resume {}"}
+RESUME: dict[str, str] = {"claude": "claude --resume {}", "codex": "codex resume {}"}
 
 
 def fake_snapshot() -> dict:
@@ -85,9 +85,21 @@ def dry_run(snap: dict) -> str:
 
     snap_mod.load = lambda path=None: snap  # type: ignore[assignment]
     snap_mod.pre_boot_warning = lambda s: None  # type: ignore[assignment]
-    restore.live_tabs = lambda: []  # type: ignore[assignment]
-    restore.current_window_index = lambda tabs: None  # type: ignore[assignment]
-    restore.current_tty = lambda: None  # type: ignore[assignment]
+    # After a reboot where iTerm reopened nothing, the one live window is the
+    # new one the README says to open and run this from: an idle shell.
+    launcher = {
+        "window_index": 1,
+        "window_id": "1",
+        "tab_index": 1,
+        "pane_index": 1,
+        "tty": "/dev/ttys000",
+        "title": "-zsh",
+        "kind": None,
+        "busy": False,
+    }
+    restore.live_tabs = lambda: [launcher]  # type: ignore[assignment]
+    restore.current_window_index = lambda tabs: 1  # type: ignore[assignment]
+    restore.current_tty = lambda: "ttys000"  # type: ignore[assignment]
     restore.running_sessions = lambda: {}  # type: ignore[assignment]
     iterm.create_window = refuse  # type: ignore[assignment]
     iterm.run_in_tab = refuse  # type: ignore[assignment]
