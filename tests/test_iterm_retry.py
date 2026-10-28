@@ -58,5 +58,14 @@ def test_persistent_failure_still_raises():
     assert calls["n"] == iterm.ENUMERATE_ATTEMPTS, f"tried {calls['n']} times"
 
 
+def test_a_slow_settle_is_outlasted():
+    # During a reboot restore iTerm kept failing the listing for longer than
+    # three quick attempts, and the restore stopped part-way.
+    failures = [iterm.ITermError("Invalid index. (-1719)")] * 5
+    calls = with_script([*failures, GOOD])
+    assert len(iterm.enumerate_tabs()) == 1, "gave up before iTerm settled"
+    assert calls["n"] == 6
+
+
 if __name__ == "__main__":
     raise SystemExit(run(globals()))
