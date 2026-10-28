@@ -252,8 +252,8 @@ Prose that states 30 s, 60 captures or three captures, and goes stale:
   - Requirements: macOS, iTerm2, and Python 3.9 or later. The macOS system
     `python3` is 3.9; the suite passes on 3.9–3.14 (checked 2026-10-27).
   - Install from a fresh clone.
-  - Update "What has been exercised for real" once a real reboot has been
-    restored from.
+  - ~~Update "What has been exercised for real" once a real reboot has been
+    restored from.~~ Done after two real reboots (2026-10-28).
   - A one-paragraph "what it does / doesn't do" at the top.
 - **Repo-local files.** `CLAUDE.md` and `AGENTS.md` are fine to publish: they
   are agent instructions, with no personal paths. Re-read them anyway.
