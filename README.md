@@ -210,11 +210,11 @@ Restore types into live shells, so it is conservative by default:
 A wrong pairing would type one window's sessions into another, so each live
 window is paired with the snapshot window it resembles most, one to one, and
 only when the evidence leaves no other choice. The evidence is the tab titles
-they share, plus the tabs, position by position, that sit in the same
-directory: at least two of them, or every tab of two windows the same size. Ties are reported, never guessed; a title that is only a shell name
-(`-zsh`) and the home directory do not count; the window you run it from is
-never paired. Anything not paired is listed with the
-command that restores it. The full rules are in
+they share, plus the tabs, position by position, that sit in the same directory:
+at least two of them, or every tab of two windows the same size. Ties are
+reported, never guessed; a title that is only a shell name (`-zsh`) and the home
+directory do not count; the window you run it from is never paired. Anything not
+paired is listed with the command that restores it. The full rules are in
 [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md#pairing-live-windows-with-snapshot-windows-restore---all).
 
 ## Snapshots and reboots
