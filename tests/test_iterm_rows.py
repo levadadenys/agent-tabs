@@ -108,5 +108,17 @@ def test_a_malformed_or_repeated_row_fails_the_listing():
     assert len(iterm._enumerate_once()) == 2, "setup: two distinct panes are fine"
 
 
+def test_the_listing_walks_windows_by_id_not_position():
+    # Positions are front-to-back order, which moves whenever a window is
+    # created or focused -- exactly what a restore does. Walking by position
+    # visited one window twice ("names window 65 tab 1 twice") or ran past the
+    # end (-1719) during a real reboot restore. Running ENUMERATE needs a live
+    # iTerm, so the walk is checked on the script's text.
+    script = iterm.ENUMERATE
+    assert "set wids to id of every window" in script
+    assert "set win to window id wid" in script
+    assert "repeat with win in windows" not in script, "walks windows by position"
+
+
 if __name__ == "__main__":
     raise SystemExit(run(globals()))
