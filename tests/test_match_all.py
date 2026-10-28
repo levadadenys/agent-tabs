@@ -36,7 +36,8 @@ def snap(*windows):
     }
 
 
-def live(*windows):
+def live(*windows, running=()):
+    """Live windows by tab title; `running` names windows where something runs."""
     rows = []
     for wi, titles in enumerate(windows, start=1):
         for ti, title in enumerate(titles, start=1):
@@ -49,7 +50,7 @@ def live(*windows):
                     "tty": f"/dev/ttys{wi}{ti}",
                     "title": title,
                     "kind": None,
-                    "busy": False,
+                    "busy": wi in running,
                 }
             )
     return rows
@@ -309,7 +310,7 @@ def test_creatable_skips_windows_an_unpaired_window_might_be():
     snapshot 3 resembles nothing, so it is.
     """
     s = snap(["notes", "a"], ["notes", "b"], ["solo"])
-    l = live(["notes"])
+    l = live(["notes"], running={1})  # something runs there: it may be the real one
     pairs, unmatched, _ = restore.match_all(s, l)
     create, refused = restore.creatable(s, l, pairs, unmatched)
     assert [w["window_index"] for w in create] == [3], create

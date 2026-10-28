@@ -8,10 +8,18 @@ for anyone who wants to check them before trusting `--go`.
 
 A wrong pairing types one window's sessions into another, so:
 
-- windows are matched by how many tab titles they share, as a one-to-one
-  assignment that maximises total overlap — a snapshot window goes to at most
-  one live window. A title that is only a shell name (`-zsh`, `bash`, …) does
-  not count: every idle tab looks like that;
+- windows are matched by evidence, as a one-to-one assignment that maximises
+  the total — a snapshot window goes to at most one live window. The evidence
+  is the distinct tab titles two windows share, plus the tab positions where
+  both sit in the same working directory. Titles carry over a crash;
+  directories carry over a reboot, where iTerm reopens each window with its
+  tabs in the right directories but every title reset to the shell's name. A
+  title that is only a shell name (`-zsh`, `bash`, …) and the home directory or
+  `/` do not count: every idle tab looks like that. Directories are compared by
+  position, so a 14-tab window and a 2-tab window in one project still differ,
+  and count only when at least two tabs agree, or every tab of two windows of
+  the same size does: one tab in a project directory would otherwise let a
+  fresh window opened there claim a bigger window;
 - the window `--all` runs in is never filled, since one of its tabs is the one
   being typed in. Run it from a new window. Run from inside a restored window
   instead, it is reported, and running again from a new window restores it —
@@ -22,7 +30,7 @@ A wrong pairing types one window's sessions into another, so:
 - a pairing is used only when it is **forced**: the same in every best
   assignment. If the evidence fits two pairings equally well, those windows are
   reported, never guessed;
-- a group of windows tangled by shared titles — more than 12 live windows, or
+- a group of windows tangled by shared evidence — more than 12 live windows, or
   more than 12 snapshot windows they could be — is reported rather than
   matched;
 - windows are targeted by iTerm's stable window id, not their position, which
@@ -34,6 +42,14 @@ command for either case, rather than as unmatched.
 
 `tests/test_match_all_oracle.py` checks the forced-pairing rule against a
 brute-force search over every assignment, on hundreds of random cases.
+
+With `--create-missing`, a snapshot window nothing was paired with is rebuilt in
+a new window. One that an unpaired live window *might* be — the evidence fits
+both — is rebuilt too when nothing runs in that live window (typically one
+iTerm reopened): at worst it is left standing empty, and nothing can run twice.
+If anything runs in it, it may be the real window, part-restored, and an ssh
+tab or other replayed command has no session id to deduplicate, so the snapshot
+window is reported, with commands for either case.
 
 ## Which capture becomes the snapshot
 

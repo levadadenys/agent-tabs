@@ -143,13 +143,23 @@ an issue.
   `tests/test_match_all_oracle.py` checks this against a brute force; keep it
   passing.
 - Never create a window unless asked (`--new-window`, `--create-missing`), and
-  never rebuild a snapshot window that an unpaired live window might be.
+  never rebuild a snapshot window that an unpaired live window might be while
+  anything runs in that live window: it may be the real one, and an ssh tab
+  or other replayed command has no session id to deduplicate. An idle live
+  window (typically one iTerm reopened) does not block the rebuild.
 - Never pair the window `restore --all` runs in: one of its tabs is the one
   being typed in, so it could only ever be part-restored. Keep a pairing only
   if it is the same with the launcher in the matching and without it: excluded,
   its snapshot window went to any window sharing one title with it; included,
   one coincidental title on it settled another window's tie.
-- A title that is only a shell name is not evidence of which window it was.
+- Pairing evidence is shared identifying titles plus tab positions in the
+  same working directory. A title that is only a shell name, and the home
+  directory or `/`, are not evidence of which window it was. Compare
+  directories by position, never as a set: one project's windows differ in how
+  many tabs, and where. Directories count only when at least two tabs agree,
+  or every tab of two same-size windows; one tab is too weak to claim a window.
+- Read an empty process table, while iTerm has tabs, as a failure: as "all
+  idle" it would let restore type into live work.
 - Never let a capture with no agent sessions overwrite a good snapshot, nor a
   collapsed one until the drop has persisted: the run of consecutive collapsed
   captures ending at the newest holds at least `COLLAPSE_STREAK` captures AND

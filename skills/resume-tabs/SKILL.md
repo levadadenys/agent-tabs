@@ -37,18 +37,15 @@ seeing the plan.
    being typed in:
 
    ```bash
-   agent-tabs restore --all --create-missing   # after a reboot
-   agent-tabs restore --all                    # windows survived (agents killed, iTerm open)
+   agent-tabs restore --all --create-missing
    ```
 
-   After a reboot, windows iTerm reopened come back as plain shells titled
-   only with the shell's name (`-zsh`), which is no evidence of which window
-   was which: they are not paired, and `--create-missing` rebuilds their
-   snapshot windows beside them. Suggest closing the reopened ones, and
-   unticking *Reopen windows when logging back in* next time. `--all` pairs a
-   live window with the snapshot window it came from only by tab titles still
-   there; `--create-missing` never rebuilds a window an unpaired live window
-   might be.
+   Windows iTerm reopened after a reboot are recognized by each tab's working
+   directory and filled in place; windows that survived a crash also by their
+   tab titles. Snapshot windows nothing matches are rebuilt in new windows,
+   including one an idle reopened window might be (the idle one can then be
+   closed). One that a window with something running might be is reported
+   with the commands for either case: tell the user rather than guess.
 
 3. Read the plan, then execute:
 

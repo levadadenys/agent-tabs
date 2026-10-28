@@ -64,6 +64,11 @@ SCHEMA_VERSION = 1
 def build() -> dict:
     tabs = iterm.enumerate_tabs()
     table = procs.process_table()
+    # Every iTerm tab runs at least a shell, so tabs with an empty table mean
+    # ps failed. As "nothing runs" it would tell restore's duplicate check that
+    # no session is running anywhere; the recorder just skips this capture.
+    if tabs and not table:
+        raise iterm.ITermError("could not read the process list (ps); refusing to guess")
     grouped = procs.by_tty(table)
 
     # Resolve the interesting process per pane first, then batch the cwd lookup:

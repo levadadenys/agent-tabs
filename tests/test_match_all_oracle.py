@@ -9,7 +9,11 @@ guarantee.
 The oracle is written from the spec, not from restore.py, and deliberately
 shares none of its code:
 - score(live, snapshot) = distinct non-blank titles they share, not counting
-  titles that are only a shell name;
+  titles that are only a shell name, plus tab positions whose working
+  directories are equal (a trailing slash aside), not counting the home
+  directory or /, and counted only when at least 2 tabs agree or every tab of
+  two same-size windows does (directories
+  carry over a reboot, where iTerm resets every title to the shell's name);
 - an assignment is one-to-one over pairs with score >= 1, windows may be left
   unassigned;
 - optimal = maximum total score, then maximum number of pairs;
@@ -36,13 +40,39 @@ _SHELLS = ("zsh", "bash", "sh", "fish", "tcsh", "csh", "ksh", "dash", "login")
 SHELL_NAMES = {name for base in _SHELLS for name in (base, f"-{base}")}
 
 
+# Likewise independent of restore.GENERIC_DIRS: every new tab starts in one of
+# these, so they identify nothing.
+NOWHERE = {str(Path.home()), "/"}
+
+
 def titles(window):
-    return {t.strip() for t in window if t.strip() and t.strip().lower() not in SHELL_NAMES}
+    names = (title.strip() for title, _ in window)
+    return {n for n in names if n and n.lower() not in SHELL_NAMES}
+
+
+def same_dirs(a, b):
+    """Tab positions where both windows sit in the same real directory.
+
+    A trailing slash names the same directory; the root and the home
+    directory are no evidence.
+    """
+
+    def real(d):
+        d = (d or "").rstrip("/")
+        return d if d and d not in {n.rstrip("/") for n in NOWHERE} else None
+
+    hits = sum(1 for (_, x), (_, y) in zip(a, b) if real(x) and real(x) == real(y))
+    # One matching tab is too weak on its own, unless the windows are the same
+    # size and every tab matches.
+    return hits if hits >= 2 or (len(a) == len(b) and hits == len(a)) else 0
 
 
 def oracle(snapshot_windows, live_windows):
     """Forced (live, snapshot) pairs, 1-based, by exhaustive enumeration."""
-    score = [[len(titles(l) & titles(s)) for s in snapshot_windows] for l in live_windows]
+    score = [
+        [len(titles(l) & titles(s)) + same_dirs(l, s) for s in snapshot_windows]
+        for l in live_windows
+    ]
     best, optima = None, []
 
     def walk(i, used, pairs, total):
@@ -79,9 +109,10 @@ def fixtures(snapshot_windows, live_windows):
                         "pane_index": 1,
                         "title": t,
                         "kind": "claude",
+                        "cwd": d,
                         "restore": "x",
                     }
-                    for j, t in enumerate(ts)
+                    for j, (t, d) in enumerate(ts)
                 ],
             }
             for i, ts in enumerate(snapshot_windows)
@@ -97,9 +128,10 @@ def fixtures(snapshot_windows, live_windows):
             "title": t,
             "kind": None,
             "busy": False,
+            "cwd": d,
         }
         for wi, ts in enumerate(live_windows, 1)
-        for ti, t in enumerate(ts, 1)
+        for ti, (t, d) in enumerate(ts, 1)
     ]
     return snap, live
 
@@ -116,7 +148,13 @@ def random_instance(rnd):
                 return rnd.choice(sorted(SHELL_NAMES))  # shell names: not evidence
             return rnd.choice(alphabet)
 
-        return [title() for _ in range(rnd.randint(1, 4))]
+        def directory():
+            roll = rnd.random()
+            if roll < 0.3:
+                return rnd.choice([None, "", str(Path.home()), str(Path.home()) + "/", "/"])
+            return rnd.choice(["/p/x", "/p/y", "/p/z", "/p/x/"])
+
+        return [(title(), directory()) for _ in range(rnd.randint(1, 4))]
 
     snapshot_windows = [window() for _ in range(rnd.randint(1, 5))]
     live_windows = [window() for _ in range(rnd.randint(1, 5))]
