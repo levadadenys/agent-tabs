@@ -42,10 +42,25 @@ class ITermError(RuntimeError):
     pass
 
 
+# Far above any healthy call (a 37-pane listing takes about 1.5 s), far below
+# osascript's own AppleEvent timeout of about 120 s, which times every retry: a
+# hung iTerm would otherwise hold the recorder, or a restore holding its lock,
+# for many minutes.
+OSASCRIPT_TIMEOUT_SECONDS = 30
+
+
 def _osascript(script: str) -> str:
     # Bytes, decoded here: text mode translates a CR into a newline, which
     # would turn a CR inside a title into a row break.
-    result = subprocess.run(["osascript", "-e", script], capture_output=True, check=False)
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            check=False,
+            timeout=OSASCRIPT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        raise ITermError(f"iTerm did not answer within {OSASCRIPT_TIMEOUT_SECONDS}s") from None
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", "replace").strip()
         raise ITermError(stderr or "osascript failed")
@@ -109,8 +124,8 @@ def enumerate_tabs() -> list[dict]:
 
     Retries with a growing wait: a tab closing while AppleScript walks a window
     raises "Invalid index (-1719)", and iTerm can be slow to answer while it is
-    restoring or starting many sessions (-1712). Observed in practice, during a
-    real reboot restore. A lost capture is cheap on any single tick and
+    restoring or starting many sessions (-1712, in the recorder's log). Both
+    observed in practice, during a real reboot restore. A lost capture is cheap on any single tick and
     expensive if it is the last one before a crash, and a restore that gives up
     stops part-way.
     """
