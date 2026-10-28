@@ -282,10 +282,10 @@ unpaired live window might be.
 **"Cannot take the restore lock."** `~/.agent-tabs` (or `AGENT_TABS_HOME`) is not
 writable. Nothing was typed; fix the permissions and run it again.
 
-**A restored tab says "No conversation found with session ID".** Claude Code
-deletes conversations nobody has touched for `cleanupPeriodDays` (30 by
-default), even while the tab is open, so a session idle that long cannot be
-resumed by anything. To keep long-lived tabs resumable, set
+**A restored tab says "No conversation found with session ID".** When Claude
+Code starts, it deletes conversations not modified for `cleanupPeriodDays` (30
+by default). A tab left idle that long can lose its conversation while it sits
+open, and then nothing can resume it. To keep long-lived tabs resumable, set
 `"cleanupPeriodDays": 365` in `~/.claude/settings.json`.
 
 **A tab says "session already running in …".** It is: restoring it would start a
