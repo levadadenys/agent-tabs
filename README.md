@@ -108,36 +108,31 @@ The first line shows when the snapshot was taken. It should be from just before
 the crash or reboot. If it says hours or days, the recorder was not running —
 see [Troubleshooting](#troubleshooting) before restoring.
 
-**After a reboot**, untick *Reopen windows when logging back in* in the Restart
-dialog. iTerm then opens nothing, and one command rebuilds every window:
+Then, from a new window, one command restores everything:
 
 ```bash
-agent-tabs restore --all --create-missing        # dry run
-agent-tabs restore --all --create-missing --go   # rebuild them
+agent-tabs restore --all --create-missing        # dry run: the plan for every window
+agent-tabs restore --all --create-missing --go   # carry it out
 ```
 
-If iTerm did reopen windows, they come back as plain shells: every tab is
-titled with the shell's name (`-zsh`), which is no evidence of which window was
-which. They are left alone, and `--create-missing` rebuilds their snapshot
-windows beside them. Close the reopened ones, before or after: nothing runs in
-them. If `list` says the snapshot was captured after the reboot, add the
-`-f ~/.agent-tabs/pre-boot.json` it prints, so the restore uses the sessions
-from before the reboot.
-
-**When windows survived** (agents killed, iTerm still open), `--all` pairs each
-live window with the snapshot window it came from, by the tab titles still
-there, and fills it in place:
-
-```bash
-agent-tabs restore --all        # dry run: the plan for every window
-agent-tabs restore --all --go   # start the sessions
-```
+- **Windows iTerm reopened** (with *Reopen windows when logging back in* ticked)
+  are recognized by each tab's working directory, which iTerm keeps, and their
+  sessions are restored in place. Their titles are reset to the shell's name,
+  so the directories are what identifies them.
+- **Windows that survived** a crash (agents killed, iTerm still open) are
+  recognized by their tab titles as well.
+- **Windows nothing matches**, or iTerm did not reopen, are rebuilt in a new
+  window. That includes one an idle reopened window *might* be, where the
+  evidence fits more than one: it is rebuilt beside it, and the idle one can be
+  closed. One that a window with something running might be is reported
+  instead, since rebuilding could run an ssh tab twice.
 
 Run it from a new window: the window you run it from is never paired, because
-one of its tabs is the one you are typing in. Windows that match nothing are
-listed, with the command that rebuilds each. A snapshot window that some
-unpaired live window *might* be is reported rather than rebuilt: restore it
-explicitly once you have checked.
+one of its tabs is the one you are typing in. If `list` says the snapshot was
+captured after the reboot, add the `-f ~/.agent-tabs/pre-boot.json` it prints,
+so the restore uses the sessions from before the reboot. Without
+`--create-missing`, nothing new is created: unmatched windows are only listed,
+with the command that rebuilds each.
 
 **Restore before starting new sessions.** Everything is a dry run until you add
 `--go`, and a session that is already running anywhere is never started twice,
@@ -213,10 +208,12 @@ Restore types into live shells, so it is conservative by default:
 ### How `--all` pairs windows
 
 A wrong pairing would type one window's sessions into another, so each live
-window is paired with the snapshot window whose tab titles it shares most, one
-to one, and only when the evidence leaves no other choice. Ties are reported,
-never guessed; a title that is only a shell name (`-zsh`) does not count; the
-window you run it from is never paired. Anything not paired is listed with the
+window is paired with the snapshot window it resembles most, one to one, and
+only when the evidence leaves no other choice. The evidence is the tab titles
+they share, plus the tabs, position by position, that sit in the same
+directory. Ties are reported, never guessed; a title that is only a shell name
+(`-zsh`) and the home directory do not count; the window you run it from is
+never paired. Anything not paired is listed with the
 command that restores it. The full rules are in
 [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md#pairing-live-windows-with-snapshot-windows-restore---all).
 
@@ -326,10 +323,11 @@ never fewer than 60 captures, so at a long interval it reaches further back (at
   the manual notes in `skills/resume-tabs/SKILL.md`.
 - A deleted git worktree must be recreated at its old path before a session that
   ran inside it can be resumed.
-- Pairing is by tab title. Shell-name titles are ignored, but any other shared
-  title counts, so two unrelated windows that happen to share one distinctive
-  title can still pair when nothing else competes. The dry run shows every
-  pairing before anything is typed.
+- Pairing is by tab titles and tab directories. Shell-name titles and the home
+  directory are ignored, but any other shared title, or a tab in the same
+  project directory at the same position, counts. So an unrelated window that
+  happens to match can still pair when nothing else competes. The dry run shows
+  every pairing before anything is typed.
 - Only agent sessions with an id are deduplicated. An ssh tab or another
   recorded command has no session to check, so restoring the same snapshot
   twice into new windows — two `--create-missing` runs whose first windows no
