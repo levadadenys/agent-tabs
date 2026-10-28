@@ -344,15 +344,23 @@ never fewer than 60 captures, so at a long interval it reaches further back (at
 ## What has been exercised for real
 
 - A genuine crash has been restored from, window by window.
-- **A real reboot** (October 2026; macOS 26.3, iTerm2 3.6.9; 30 agent sessions
-  in 5 windows). The pre-reboot copy held all 30. One
-  `restore --all --create-missing -f ~/.agent-tabs/pre-boot.json --go` started
-  31 tabs across 5 windows, and 28 of the 30 sessions resumed. The other 2
-  could not be: Claude Code had deleted their transcripts after 30 idle days
-  (see [Troubleshooting](#troubleshooting)).
-- That run came after the reboot exposed a bug. Reading iTerm's window list by
-  position raced with the windows a restore creates and focuses, and every
-  earlier attempt stopped part-way. The list is now read by window id.
+- **Two real reboots** in October 2026, on macOS 26.3 with iTerm2 3.6.9.
+- **The first** (30 agent sessions in 5 windows) exposed two problems:
+  - reading iTerm's window list by position raced with the windows a restore
+    creates and focuses, so every attempt stopped part-way;
+  - windows iTerm reopened came back titled `-zsh`, so they could not be
+    paired and were rebuilt beside the blanks.
+
+  The list is now read by window id, and reopened windows are recognized by
+  their tabs' working directories. Once the race was fixed, a single restore from
+  `pre-boot.json` resumed 28 of the 30 sessions. The other 2 could not be:
+  Claude Code had deleted their transcripts after 30 idle days (see
+  [Troubleshooting](#troubleshooting)).
+- **The second** had *Reopen windows when logging back in* ticked, with 28
+  agent sessions in 6 windows. It was restored from a new window by asking
+  Claude, through the `resume-tabs` skill. **All 28 sessions resumed, in the
+  windows iTerm reopened**: each live window matched one pre-reboot window, and
+  none was rebuilt beside it.
 - The recorder has run unattended under launchd since September 2026.
 
 Run the dry run first and read it.
@@ -396,7 +404,6 @@ uninstall](#stop-or-uninstall): the launchd job, two symlinks and
   [docs/specs/MULTI_TERMINAL.md](docs/specs/MULTI_TERMINAL.md); nothing is built
   yet.
 - **Split panes** recreated, not only recorded.
-- **A real reboot** restored from, and the result recorded above.
 
 ## Development
 
