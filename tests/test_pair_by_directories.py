@@ -147,5 +147,54 @@ def test_live_tabs_carries_each_tabs_directory():
     assert calls == [[101, 102]], f"expected one batched lsof call: {calls}"
 
 
+def test_one_matching_tab_does_not_claim_a_bigger_window():
+    # A fresh window opened in a project directory resembles any snapshot
+    # window whose first tab worked there; its other tabs would be filled.
+    s = snap(["/p/web", "/p/web/docs", "/p/api"])
+    assert paired(s, reopened(["/p/web"])) == {}, "one tab claimed a three-tab window"
+    assert paired(s, reopened(["/p/web", "/p/web/docs", "/p/api"])) == {1: 1}, "setup"
+
+
+def test_a_reopened_one_tab_window_still_pairs_with_its_own():
+    # Same size, every tab agrees: as strong as one tab can be.
+    s = snap(["/p/helpers"], ["/p/mentat"] * 3)
+    assert paired(s, reopened(["/p/helpers"])) == {1: 1}, paired(s, reopened(["/p/helpers"]))
+
+
+def test_a_split_tab_is_judged_by_its_first_pane():
+    # Only the first pane is ever recreated; a later pane's directory is not
+    # what the tab was. Here pane 1 is in HOME, so tab 1 says nothing.
+    s = snap(["/p/web", "/p/web/docs"])
+    live = reopened([HOME, "/p/web/docs"])
+    live.insert(1, {**live[0], "pane_index": 2, "tty": "/dev/ttys112", "cwd": "/p/web"})
+    assert paired(s, live) == {}, "a second pane's directory was used as the tab's"
+
+
+def test_a_failed_process_listing_fails_closed():
+    # ps failing returns no processes; read as "all idle" it would let restore
+    # type into live work, and let busy windows stop blocking rebuilds.
+    saved = (iterm.enumerate_tabs, procs.process_table)
+    try:
+        iterm.enumerate_tabs = lambda: [  # type: ignore[assignment]
+            {
+                "window_index": 1,
+                "window_id": "9",
+                "tab_index": 1,
+                "pane_index": 1,
+                "tty": "/dev/ttys01",
+                "title": "-zsh",
+            }
+        ]
+        procs.process_table = lambda: []  # type: ignore[assignment]
+        try:
+            restore.live_tabs()
+        except iterm.ITermError:
+            pass
+        else:
+            raise AssertionError("an empty process table was read as all idle")
+    finally:
+        iterm.enumerate_tabs, procs.process_table = saved  # type: ignore[assignment]
+
+
 if __name__ == "__main__":
     raise SystemExit(run(globals()))
