@@ -186,12 +186,17 @@ def test_a_failed_process_listing_fails_closed():
             }
         ]
         procs.process_table = lambda: []  # type: ignore[assignment]
-        try:
-            restore.live_tabs()
-        except iterm.ITermError:
-            pass
-        else:
-            raise AssertionError("an empty process table was read as all idle")
+        # Both readers: live_tabs (busy state) and running_sessions, whose
+        # capture says which sessions must not be started twice.
+        for reader in (restore.live_tabs, restore.running_sessions):
+            try:
+                reader()
+            except iterm.ITermError:
+                continue
+            raise AssertionError(f"{reader.__name__} read an empty process table as all idle")
+        # With iTerm holding no tabs at all, an empty table is simply correct.
+        iterm.enumerate_tabs = lambda: []  # type: ignore[assignment]
+        assert restore.live_tabs() == [] and restore.running_sessions() == {}
     finally:
         iterm.enumerate_tabs, procs.process_table = saved  # type: ignore[assignment]
 
