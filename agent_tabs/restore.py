@@ -7,6 +7,7 @@ import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cache
+from pathlib import Path
 
 from . import adapters, iterm, procs
 from . import snapshot as snap_mod
@@ -56,15 +57,25 @@ def is_busy(proc: procs.Proc | None) -> bool:
 
 
 def live_tabs() -> list[dict]:
-    """Live iTerm tabs annotated with whatever agent is running in them."""
+    """Live iTerm tabs annotated with what runs in them, and where.
+
+    The working directory is pairing evidence: after a reboot, windows iTerm
+    reopens keep each tab's directory but not its title.
+    """
     tabs = iterm.enumerate_tabs()
     grouped = procs.by_tty(procs.process_table())
+    found = []
     for tab in tabs:
         proc = procs.foreground_proc(
             grouped.get(procs.normalise_tty(tab["tty"]), []), adapters.AGENT_KINDS
         )
         tab["kind"] = proc.argv0 if proc else None
         tab["busy"] = is_busy(proc)
+        found.append((tab, proc))
+    # One lsof call for every tab, not one per tab.
+    cwds = procs.cwd_of([proc.pid for _, proc in found if proc is not None])
+    for tab, proc in found:
+        tab["cwd"] = cwds.get(proc.pid) if proc is not None else None
     return tabs
 
 
@@ -108,6 +119,42 @@ GENERIC_TITLES = frozenset(
 )
 
 
+# The same goes for a directory every new tab starts in: a fresh window opened
+# in the home directory says nothing about which window it was.
+GENERIC_DIRS = frozenset({str(Path.home()), "/"})
+
+
+def identifying_dirs(tabs) -> dict[int, str]:
+    """Each tab's working directory, by tab position, where it tells windows apart.
+
+    Compared by position, not as a set: two windows that both worked in one
+    project still differ in how many tabs, and in which order. Only a tab's
+    first pane is used, as only it is ever recreated.
+    """
+    found: dict[int, str] = {}
+    for tab in sorted(tabs, key=lambda t: (t["tab_index"], t.get("pane_index", 1))):
+        cwd = (tab.get("cwd") or "").rstrip("/") or ("/" if tab.get("cwd") else "")
+        if tab["tab_index"] in found or not cwd or cwd in GENERIC_DIRS:
+            found.setdefault(tab["tab_index"], "")
+            continue
+        found[tab["tab_index"]] = cwd
+    return {i: d for i, d in found.items() if d}
+
+
+def evidence(snapshot_tabs, live_tabs) -> int:
+    """How strongly a live window resembles a snapshot window.
+
+    Shared identifying titles, plus tab positions whose working directories
+    agree. Titles carry over a crash; directories carry over a reboot, where
+    iTerm reopens windows with every title reset to the shell's name.
+    """
+    snapshot_tabs, live_tabs = list(snapshot_tabs), list(live_tabs)
+    titles = len(identifying_titles(snapshot_tabs) & identifying_titles(live_tabs))
+    theirs, ours = identifying_dirs(snapshot_tabs), identifying_dirs(live_tabs)
+    dirs = sum(1 for i, d in ours.items() if theirs.get(i) == d)
+    return titles + dirs
+
+
 def identifying_titles(tabs) -> set[str]:
     """Titles that can tell windows apart: non-blank and not just a shell name."""
     found = set()
@@ -123,13 +170,10 @@ def _best_match(snap: dict, live: list[dict], window_index: int) -> tuple[int, d
 
     Raises Ambiguous when two snapshot windows fit equally well.
     """
-    live_titles = identifying_titles(t for t in live if t["window_index"] == window_index)
-    if not live_titles:
-        return None
+    here = [t for t in live if t["window_index"] == window_index]
     scored = []
     for window in snap.get("windows", []):
-        titles = identifying_titles(window.get("tabs", []))
-        score = len(titles & live_titles)
+        score = evidence(window.get("tabs", []), here)
         if score:
             scored.append((score, window))
     if not scored:
@@ -147,10 +191,10 @@ def _best_match(snap: dict, live: list[dict], window_index: int) -> tuple[int, d
 
 
 def match_window(snap: dict, live: list[dict], window_index: int) -> dict | None:
-    """Guess which snapshot window corresponds to a live window, by title overlap.
+    """Guess which snapshot window corresponds to a live window.
 
-    After a crash iTerm restores tab titles but not the processes, so titles are
-    the only carry-over signal available.
+    By shared tab titles, which survive a crash, and tab directories, which
+    survive a reboot; see evidence().
     """
     best = _best_match(snap, live, window_index)
     return best[1] if best else None
@@ -179,12 +223,11 @@ def select_window(snap: dict, number: int | None, live: list[dict]) -> tuple[dic
 
 
 def _overlaps(snap: dict, live: list[dict], window_index: int) -> dict[int, int]:
-    """Title overlap between one live window and every snapshot window."""
-    live_titles = identifying_titles(t for t in live if t["window_index"] == window_index)
+    """Evidence linking one live window to every snapshot window it resembles."""
+    here = [t for t in live if t["window_index"] == window_index]
     scores: dict[int, int] = {}
     for window in snap.get("windows", []):
-        titles = identifying_titles(window.get("tabs", []))
-        score = len(titles & live_titles)
+        score = evidence(window.get("tabs", []), here)
         if score:
             scores[window["window_index"]] = score
     return scores
@@ -355,7 +398,9 @@ def match_all(snap: dict, live: list[dict]) -> tuple[list[tuple[int, dict]], lis
     for live_index in sorted({t["window_index"] for t in live}):
         overlaps = _overlaps(snap, live, live_index)
         if not overlaps:
-            notes.append(f"live window {live_index}: no snapshot window matches its tab titles")
+            notes.append(
+                f"live window {live_index}: no snapshot window matches its tab titles or directories"
+            )
             continue
         order.append(live_index)
         scores[live_index] = overlaps
@@ -403,7 +448,7 @@ def running_sessions() -> dict[str, str]:
 
 
 def resembles_snapshot(snap: dict, live: list[dict], window_index: int) -> bool:
-    """Whether a live window shares any identifying title with the snapshot."""
+    """Whether a live window shares any evidence with the snapshot."""
     return bool(_overlaps(snap, live, window_index))
 
 
@@ -412,16 +457,24 @@ def creatable(
 ) -> tuple[list[dict], dict[int, str]]:
     """Which unmatched snapshot windows --create-missing may rebuild.
 
-    A snapshot window left unpaired because some live window might be it --
-    an unpaired live window that shares titles with it -- is reported, not
-    rebuilt: creating it would sidestep a deliberate refusal to guess, and
-    leave the window that may be the real one sitting idle. Live windows that
-    were paired do not count: their stray overlap with another snapshot window
-    says nothing about it.
+    A snapshot window left unpaired because some live window might be it -- an
+    unpaired live window that shares evidence with it -- is reported, not
+    rebuilt, when anything runs in that live window: it may be the real one,
+    part-restored, and an ssh tab or other recorded command has no session id
+    to deduplicate, so a rebuild would run it twice.
+
+    A live window where nothing runs at all is no such risk -- typically one
+    iTerm reopened after a reboot, idle shells only. Rebuilding beside it at
+    worst leaves it standing empty, so it does not block the rebuild.
+
+    Live windows that were paired do not count either: their stray overlap with
+    another snapshot window says nothing about it.
     """
     paired = {w for w, _ in pairs}
     contested: dict[int, list[int]] = {}
     for live_index in sorted({t["window_index"] for t in live} - paired):
+        if not any(t.get("busy") for t in live if t["window_index"] == live_index):
+            continue
         for snap_index in _overlaps(snap, live, live_index):
             contested.setdefault(snap_index, []).append(live_index)
 
