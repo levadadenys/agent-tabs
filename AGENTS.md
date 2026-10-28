@@ -156,7 +156,10 @@ an issue.
   same working directory. A title that is only a shell name, and the home
   directory or `/`, are not evidence of which window it was. Compare
   directories by position, never as a set: one project's windows differ in how
-  many tabs, and where.
+  many tabs, and where. Directories count only when at least two tabs agree,
+  or every tab of two same-size windows; one tab is too weak to claim a window.
+- Read an empty process table, while iTerm has tabs, as a failure: as "all
+  idle" it would let restore type into live work.
 - Never let a capture with no agent sessions overwrite a good snapshot, nor a
   collapsed one until the drop has persisted: the run of consecutive collapsed
   captures ending at the newest holds at least `COLLAPSE_STREAK` captures AND
