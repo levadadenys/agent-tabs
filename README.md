@@ -134,6 +134,13 @@ so the restore uses the sessions from before the reboot. Without
 `--create-missing`, nothing new is created: unmatched windows are only listed,
 with the command that rebuilds each.
 
+**Or ask Claude.** `install` adds a `resume-tabs` skill to Claude Code. After a
+reboot, open a new iTerm window, start `claude` in it, and say *my Mac rebooted,
+restore my tabs*. Claude checks the snapshot, runs the dry run, shows you the
+plan, and carries it out only when you say so. Give it a window of its own:
+Claude runs commands without a terminal, so restore cannot tell which window
+Claude is in, and would treat any other tab in that window like the rest.
+
 **Restore before starting new sessions.** Everything is a dry run until you add
 `--go`, and a session that is already running anywhere is never started twice,
 so it is safe to run the dry run first and read it.
