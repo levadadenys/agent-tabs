@@ -15,16 +15,21 @@ into live shells, so a wrong result is not a cosmetic bug.
 2. **Always open a PR.** Branch names follow the commit types below
    (`fix/`, `feat/`, `chore/`, …).
 
-   GitHub branch protection requires a paid plan for private repositories, so
-   `main` is guarded by a pre-push hook instead. Enable it once per clone:
+   `main` is protected by a GitHub ruleset: changes land through a pull
+   request, the lint and gitleaks jobs (`ci.yml`) must pass, and force-pushes
+   and deleting `main` are refused. The macOS tests are not required by it,
+   since they do not run on docs-only changes; a required check that never
+   runs would block the merge.
+
+   The pre-push hook is a local convenience on top. Enable it once per clone:
 
    ```bash
    git config core.hooksPath .githooks
    ```
 
-   It rejects any push to `main`; `--no-verify` bypasses it deliberately. If
-   this repo ever goes public, replace the hook with a real ruleset — a local
-   hook is a reminder, not an enforcement boundary.
+   It refuses a push to `main` and scans the commits being pushed with
+   gitleaks, so a leak is caught before it reaches GitHub. `--no-verify` skips
+   it; the ruleset and CI still apply.
 3. **One commit per file**, conventional-commit style. The subject says what
    changed; the body says *why it was wrong*, not what the diff shows.
 4. Before ending a session that used a worktree, ask whether to keep or delete it.
@@ -67,7 +72,7 @@ These are deliberate. Do not "fix" them:
   the rollout file path, not from `ps`.
 - Split panes are recorded but only the first pane of each tab is recreated.
 
-## The repo is intended to become public
+## The repo is public
 
 Nothing installation-specific may be committed. Personal paths, account names
 and machine details belong in `~/.agent-tabs/config.json`, which is outside the
