@@ -67,9 +67,15 @@ ENUMERATE = (
     + f"""
 tell application "iTerm2"
     set out to ""
+    -- Windows by id, never by position: the position is front-to-back order,
+    -- which changes whenever a window is created or focused, so walking
+    -- "window 1, window 2, ..." while that happens visits one window twice or
+    -- runs past the end (-1719). wi is the order at the moment the ids were read.
+    set wids to id of every window
     set wi to 0
-    repeat with win in windows
+    repeat with wid in wids
         set wi to wi + 1
+        set win to window id wid
         set ti to 0
         repeat with tb in tabs of win
             set ti to ti + 1
@@ -94,17 +100,19 @@ def is_running() -> bool:
         return False
 
 
-ENUMERATE_ATTEMPTS = 3
-ENUMERATE_BACKOFF_SECONDS = 0.4
+ENUMERATE_ATTEMPTS = 6
+ENUMERATE_BACKOFF_SECONDS = 0.5  # times the attempt number: 0.5 s, 1 s, ... 2.5 s
 
 
 def enumerate_tabs() -> list[dict]:
     """Every split-pane session in every window, with its tty and title.
 
-    Retries a few times: closing a tab while AppleScript is walking the window
-    list raises "Invalid index (-1719)" and loses the whole capture. Observed in
-    practice, not theoretical. A lost capture is cheap on any single tick and
-    expensive if it is the last one before a crash.
+    Retries with a growing wait: a tab closing while AppleScript walks a window
+    raises "Invalid index (-1719)", and iTerm can be slow to answer while it is
+    restoring or starting many sessions (-1712). Observed in practice, during a
+    real reboot restore. A lost capture is cheap on any single tick and
+    expensive if it is the last one before a crash, and a restore that gives up
+    stops part-way.
     """
     last: ITermError | None = None
     for attempt in range(ENUMERATE_ATTEMPTS):
@@ -113,7 +121,7 @@ def enumerate_tabs() -> list[dict]:
         except ITermError as exc:
             last = exc
             if attempt < ENUMERATE_ATTEMPTS - 1:
-                time.sleep(ENUMERATE_BACKOFF_SECONDS)
+                time.sleep(ENUMERATE_BACKOFF_SECONDS * (attempt + 1))
     raise last if last else ITermError("enumeration failed")
 
 
