@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="886" height="444" viewBox="0 0 886 444" role="img" aria-label="agent-tabs restore --all --create-missing: a dry run listing, for each window lost in a reboot, the command each tab would get">
+<rect width="886" height="444" rx="10" fill="#1e1f24"/>
+<path d="M0 10a10 10 0 0 1 10-10h866a10 10 0 0 1 10 10v24H0z" fill="#2b2d33"/>
+<circle cx="18" cy="17" r="6" fill="#ff5f57"/><circle cx="38" cy="17" r="6" fill="#febc2e"/><circle cx="58" cy="17" r="6" fill="#28c840"/>
+<g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" xml:space="preserve" style="white-space:pre">
+<text x="20" y="67" fill="#7ee787" font-weight="600">$ agent-tabs restore --all --create-missing</text>
+<text x="20" y="86" fill="#8b919c">Snapshot captured 2026-10-28T07:55:24+00:00  (3m ago)</text>
+<text x="20" y="105" fill="#d7dae0"></text>
+<text x="20" y="124" fill="#79c0ff" font-weight="600">snapshot window 1 -&gt; a new window  (4 to start)</text>
+<text x="20" y="143" fill="#d7dae0">  tab  1  cd /Users/you/code/storefront &amp;&amp; claude --resume 86397246-17a8-55a2-9886-e56d684b0f01</text>
+<text x="20" y="162" fill="#d7dae0">  tab  2  cd /Users/you/code/storefront &amp;&amp; claude --resume 15963967-c5fd-5338-a60b-e07c28199987</text>
+<text x="20" y="181" fill="#d7dae0">  tab  3  cd /Users/you/code/storefront &amp;&amp; codex resume 1f193d0b-335c-59fb-8f2c-1be01618138a</text>
+<text x="20" y="200" fill="#d7dae0">  tab  4  cd /Users/you/code/storefront</text>
+<text x="20" y="219" fill="#d7dae0"></text>
+<text x="20" y="238" fill="#79c0ff" font-weight="600">snapshot window 2 -&gt; a new window  (3 to start)</text>
+<text x="20" y="257" fill="#d7dae0">  tab  1  cd /Users/you/code/api &amp;&amp; claude --resume 5e1a905c-07d6-5b98-9593-e9dc39dcdce1</text>
+<text x="20" y="276" fill="#d7dae0">  tab  2  cd /Users/you/code/api &amp;&amp; codex resume 57360acc-e5cb-52de-956e-d7940c4ae4c5</text>
+<text x="20" y="295" fill="#d7dae0">  tab  3  cd /Users/you/code/api &amp;&amp; ssh staging</text>
+<text x="20" y="314" fill="#d7dae0"></text>
+<text x="20" y="333" fill="#79c0ff" font-weight="600">snapshot window 3 -&gt; a new window  (2 to start)</text>
+<text x="20" y="352" fill="#d7dae0">  tab  1  cd /Users/you/code/infra &amp;&amp; claude --resume f345f924-78d6-59d9-a21d-1364138cf9a7</text>
+<text x="20" y="371" fill="#d7dae0">  tab  2  cd /Users/you/code/infra &amp;&amp; claude --resume 7feb18ee-c4f9-5c16-9f1f-da557e4d9a71</text>
+<text x="20" y="390" fill="#d7dae0"></text>
+<text x="20" y="409" fill="#e3b341">Dry run. 9 tabs would start across 3 windows.</text>
+<text x="20" y="428" fill="#e3b341">Add --go to execute.</text>
+</g>
+</svg>
