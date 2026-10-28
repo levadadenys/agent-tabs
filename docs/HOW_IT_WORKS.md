@@ -16,7 +16,10 @@ A wrong pairing types one window's sessions into another, so:
   tabs in the right directories but every title reset to the shell's name. A
   title that is only a shell name (`-zsh`, `bash`, …) and the home directory or
   `/` do not count: every idle tab looks like that. Directories are compared by
-  position, so a 14-tab window and a 2-tab window in one project still differ;
+  position, so a 14-tab window and a 2-tab window in one project still differ,
+  and count only when at least two tabs agree, or every tab of two windows of
+  the same size does: one tab in a project directory would otherwise let a
+  fresh window opened there claim a bigger window;
 - the window `--all` runs in is never filled, since one of its tabs is the one
   being typed in. Run it from a new window. Run from inside a restored window
   instead, it is reported, and running again from a new window restores it —
