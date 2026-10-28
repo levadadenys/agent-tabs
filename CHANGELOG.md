@@ -36,6 +36,8 @@ a crash or reboot.
   shell syntax, zsh's included, checked at capture and again when planning. `--go --force` is
   refused unless restore runs in an iTerm tab. Busy tabs and running sessions are re-checked
   immediately before typing (#4, #5).
+- iTerm's window list is read by window id, not position, so windows created or focused during a
+  restore can no longer stop it part-way; found in a real reboot restore.
 - A process cannot pose as another tab's process through a line separator in its arguments, and
   a tab title cannot forge a row in iTerm's tab listing.
 
