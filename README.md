@@ -349,18 +349,19 @@ never fewer than 60 captures, so at a long interval it reaches further back (at
   - reading iTerm's window list by position raced with the windows a restore
     creates and focuses, so every attempt stopped part-way;
   - windows iTerm reopened came back titled `-zsh`, so they could not be
-    paired and were rebuilt beside the blanks.
+    paired with their pre-reboot windows, and the restore built new windows
+    beside them.
 
   The list is now read by window id, and reopened windows are recognized by
-  their tabs' working directories. Once the race was fixed, a single restore from
+  their tabs' working directories. Once the window-list fix was in, a single restore from
   `pre-boot.json` resumed 28 of the 30 sessions. The other 2 could not be:
   Claude Code had deleted their transcripts after 30 idle days (see
   [Troubleshooting](#troubleshooting)).
 - **The second** had *Reopen windows when logging back in* ticked, with 28
   agent sessions in 6 windows. It was restored from a new window by asking
   Claude, through the `resume-tabs` skill. **All 28 sessions resumed, in the
-  windows iTerm reopened**: each live window matched one pre-reboot window, and
-  none was rebuilt beside it.
+  windows iTerm reopened**: six windows before the reboot, six after, and no
+  extra window was created.
 - The recorder has run unattended under launchd since September 2026.
 
 Run the dry run first and read it.
